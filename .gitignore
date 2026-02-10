@@ -1,0 +1,7 @@
+node_modules/
+dist/
+ui/dist/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

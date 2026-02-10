@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: 250 250 250;
+    --background-card: 244 244 245;
+    --background-hover: 228 228 231;
+    --foreground: 9 9 11;
+    --foreground-muted: 113 113 122;
+    --success: 34 197 94;
+    --failure: 239 68 68;
+    --border: 228 228 231;
+  }
+
+  .dark {
+    --background: 10 10 11;
+    --background-card: 24 24 27;
+    --background-hover: 39 39 42;
+    --foreground: 255 255 255;
+    --foreground-muted: 161 161 170;
+    --success: 34 197 94;
+    --failure: 239 68 68;
+    --border: 39 39 42;
+  }
+
+  body {
+    @apply bg-[rgb(var(--background))] text-[rgb(var(--foreground))] font-sans antialiased;
+  }
+}
