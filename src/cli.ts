@@ -38,7 +38,9 @@ export async function main(): Promise<void> {
     .description('View Kiro CLI command history and chat conversations in your browser')
     .version('0.1.0')
     .argument('[path]', 'Path to the kiro CLI database file')
-    .action(async (userPath?: string) => {
+    .option('-p, --port <number>', 'Port to run the server on (default: auto)')
+    .option('--no-open', 'Do not open browser automatically')
+    .action(async (userPath?: string, options?: { port?: string; open?: boolean }) => {
       const dbPath = resolveDbPath(userPath);
 
       // Check if database file exists
@@ -54,7 +56,8 @@ export async function main(): Promise<void> {
       const reader = createDatabaseReader(dbPath);
 
       // Start server
-      const { port, close: closeServer } = await startServer({ reader });
+      const requestedPort = options?.port ? parseInt(options.port, 10) : 0;
+      const { port, close: closeServer } = await startServer({ reader, port: requestedPort });
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
 
@@ -64,9 +67,13 @@ export async function main(): Promise<void> {
         notifyClients();
       });
 
-      // Open browser
-      const opened = await openBrowser(url);
-      if (!opened) {
+      // Open browser (unless --no-open)
+      if (options?.open !== false) {
+        const opened = await openBrowser(url);
+        if (!opened) {
+          console.log(`Open this URL in your browser: ${url}`);
+        }
+      } else {
         console.log(`Open this URL in your browser: ${url}`);
       }
 

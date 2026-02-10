@@ -132,14 +132,14 @@ export function createApp(options: ServerOptions): Hono {
 }
 
 export async function startServer(
-  options: ServerOptions
+  options: ServerOptions & { port?: number }
 ): Promise<{ port: number; close: () => void }> {
   const app = createApp(options);
 
   return new Promise((resolve) => {
     const server = serve({
       fetch: app.fetch,
-      port: 0, // Let OS assign available port
+      port: options.port || 0, // Use specified port or let OS assign
     }, (info) => {
       resolve({
         port: info.port,

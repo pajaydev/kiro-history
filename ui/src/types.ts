@@ -27,8 +27,16 @@ export interface ParsedConversation {
   updatedAt?: number; // Unix timestamp in milliseconds (from V2 table)
 }
 
+// Tool use entry
+export interface ToolUse {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
 // Individual message in a conversation
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
+  toolUses?: ToolUse[];
 }

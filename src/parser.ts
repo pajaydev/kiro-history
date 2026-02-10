@@ -1,4 +1,10 @@
-import type { ParsedConversation, ConversationMessage } from './types.js';
+import type { ParsedConversation, ConversationMessage, ToolUse } from './types.js';
+
+interface RawToolUse {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
 
 interface RawConversation {
   conversation_id: string;
@@ -15,12 +21,21 @@ interface RawHistoryEntry {
   };
   assistant?: {
     Response?: { message_id: string; content: string };
-    ToolUse?: { message_id: string; content: string; tool_uses: unknown[] };
+    ToolUse?: { message_id: string; content: string; tool_uses: RawToolUse[] };
   };
 }
 
 interface SessionMessage extends ConversationMessage {
   timestamp?: Date;
+}
+
+function extractToolUses(rawToolUses?: RawToolUse[]): ToolUse[] | undefined {
+  if (!rawToolUses || rawToolUses.length === 0) return undefined;
+  return rawToolUses.map((t) => ({
+    id: t.id,
+    name: t.name,
+    args: t.args,
+  }));
 }
 
 // Gap threshold for splitting sessions (30 minutes)
@@ -133,6 +148,7 @@ export function parseConversationValue(
 
 // Simple parser that returns all messages without session splitting
 // Used for V2 conversations which are already separate
+// Merges consecutive assistant messages into one
 export function parseConversationValueSimple(
   key: string,
   jsonValue: string
@@ -156,15 +172,36 @@ export function parseConversationValueSimple(
 
       // Extract assistant message from Response or ToolUse
       if (entry.assistant) {
+        let content = '';
+        let toolUses: ToolUse[] | undefined;
+
         if (entry.assistant.Response?.content) {
+          content = entry.assistant.Response.content;
+        } else if (entry.assistant.ToolUse) {
+          content = entry.assistant.ToolUse.content;
+          toolUses = extractToolUses(entry.assistant.ToolUse.tool_uses);
+        }
+
+        // Merge with previous assistant message if exists
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant') {
+          // Append content (with separator if both have content)
+          if (content) {
+            lastMsg.content = lastMsg.content 
+              ? lastMsg.content + '\n\n' + content 
+              : content;
+          }
+          // Merge tool uses
+          if (toolUses) {
+            lastMsg.toolUses = lastMsg.toolUses 
+              ? [...lastMsg.toolUses, ...toolUses] 
+              : toolUses;
+          }
+        } else {
           messages.push({
             role: 'assistant',
-            content: entry.assistant.Response.content,
-          });
-        } else if (entry.assistant.ToolUse?.content) {
-          messages.push({
-            role: 'assistant',
-            content: entry.assistant.ToolUse.content,
+            content,
+            toolUses,
           });
         }
       }
