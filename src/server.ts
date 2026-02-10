@@ -42,17 +42,6 @@ export function createApp(options: ServerOptions): Hono {
     return c.json({ error: 'Internal server error' }, 500);
   });
 
-  // API: Get commands
-  app.get('/api/commands', (c) => {
-    try {
-      const commands = reader.getCommands();
-      return c.json(commands);
-    } catch (error) {
-      console.error('Failed to read commands:', error);
-      return c.json({ error: 'Failed to read database' }, 500);
-    }
-  });
-
   // API: Get conversations (parsed)
   app.get('/api/conversations', (c) => {
     try {
@@ -86,7 +75,7 @@ export function createApp(options: ServerOptions): Hono {
   // API: SSE endpoint for live updates
   app.get('/api/events', (c) => {
     return streamSSE(c, async (stream) => {
-      const send = (data: string) => {
+      const send = () => {
         stream.writeSSE({ event: 'refresh', data: '{}' });
       };
 
