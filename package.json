@@ -10,7 +10,7 @@
     "build:server": "tsc",
     "build:web": "cd ui && vite build",
     "build": "npm run build:server && npm run build:web",
-    "dev": "tsx watch src/cli.ts",
+    "dev": "tsx watch server/cli.ts",
     "start": "node dist/cli.js",
     "prepublishOnly": "npm run build",
     "test": "vitest"

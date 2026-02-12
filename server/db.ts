@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { CommandEntry, ConversationEntry } from './types.js';
+import type { ConversationEntry } from './types.js';
 
 export interface ConversationEntryV2 {
   key: string;
@@ -10,7 +10,6 @@ export interface ConversationEntryV2 {
 }
 
 export interface DatabaseReader {
-  getCommands(): CommandEntry[];
   getConversations(): ConversationEntry[];
   getConversationsV2(): ConversationEntryV2[];
   hasV2Table(): boolean;
@@ -40,23 +39,6 @@ export function createDatabaseReader(dbPath: string): DatabaseReader {
     }
   })();
 
-  const commandsStmt = hasHistory ? db.prepare(`
-    SELECT 
-      id,
-      command,
-      shell,
-      pid,
-      session_id as sessionId,
-      cwd,
-      start_time as startTime,
-      hostname,
-      exit_code as exitCode,
-      end_time as endTime,
-      duration
-    FROM history
-    ORDER BY start_time DESC
-  `) : null;
-
   const conversationsStmt = db.prepare(`
     SELECT key, value
     FROM conversations
@@ -74,15 +56,6 @@ export function createDatabaseReader(dbPath: string): DatabaseReader {
   `) : null;
 
   return {
-    getCommands(): CommandEntry[] {
-      if (!commandsStmt) return [];
-      try {
-        return commandsStmt.all() as CommandEntry[];
-      } catch {
-        return [];
-      }
-    },
-
     getConversations(): ConversationEntry[] {
       try {
         return conversationsStmt.all() as ConversationEntry[];

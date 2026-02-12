@@ -45,11 +45,9 @@ export function createApp(options: ServerOptions): Hono {
   // API: Get conversations (parsed)
   app.get('/api/conversations', (c) => {
     try {
-      // Prefer V2 table if available
       if (reader.hasV2Table()) {
         const v2Conversations = reader.getConversationsV2();
         const parsed = v2Conversations.map((conv) => {
-          // For V2, get all messages without session splitting
           const allMessages = parseConversationValueSimple(conv.key, conv.value);
           return {
             directoryPath: conv.key,
@@ -95,7 +93,6 @@ export function createApp(options: ServerOptions): Hono {
     });
   });
 
-  // Serve static files from ui/dist and SPA fallback
   const uiDistPath = join(__dirname, '..', 'ui', 'dist');
 
   app.get('/*', async (c) => {

@@ -4,7 +4,7 @@ import { homedir, platform } from 'os';
 import { join } from 'path';
 import { Command } from 'commander';
 import { createDatabaseReader } from './db.js';
-import { startServer, notifyClients } from './server.js';
+import { startServer, notifyClients } from './index.js';
 import { watchFile } from './watcher.js';
 import { openBrowser } from './browser.js';
 
@@ -14,8 +14,8 @@ export function resolveDbPath(userPath?: string): string {
   }
 
   const plat = platform();
-  
-  // Check kiro-cli first (newer), then amazon-q (older)
+ 
+  // support both Kiro and amazon Q cli
   if (plat === 'darwin') {
     const kiroCli = join(homedir(), 'Library', 'Application Support', 'kiro-cli', 'data.sqlite3');
     if (existsSync(kiroCli)) return kiroCli;

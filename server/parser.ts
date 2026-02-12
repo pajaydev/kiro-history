@@ -146,9 +146,6 @@ export function parseConversationValue(
   }
 }
 
-// Simple parser that returns all messages without session splitting
-// Used for V2 conversations which are already separate
-// Merges consecutive assistant messages into one
 export function parseConversationValueSimple(
   key: string,
   jsonValue: string
