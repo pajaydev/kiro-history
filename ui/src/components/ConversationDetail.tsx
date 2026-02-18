@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, Sparkles, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
+import { User, Sparkles, ChevronDown, ChevronRight, Wrench, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -45,6 +45,19 @@ function ToolUseBadges({ toolUses }: { toolUses: ToolUse[] }) {
 }
 
 export function ConversationDetail({ conversation }: ConversationDetailProps) {
+  const [copiedPath, setCopiedPath] = useState(false);
+
+  const handleCopyPath = async () => {
+    if (!conversation) return;
+    try {
+      await navigator.clipboard.writeText(conversation.directoryPath);
+      setCopiedPath(true);
+      setTimeout(() => setCopiedPath(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy path:', err);
+    }
+  };
+
   if (!conversation) {
     return (
       <div className="flex-1 flex items-center justify-center text-[rgb(var(--foreground-muted))]">
@@ -62,8 +75,41 @@ export function ConversationDetail({ conversation }: ConversationDetailProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Header with path and copy button */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[rgb(var(--border))] bg-[rgb(var(--background-card))]">
+        <div className="flex-1 min-w-0 mr-3">
+          <div className="text-xs text-[rgb(var(--foreground-muted))] mb-0.5">Directory</div>
+          <div className="text-sm text-[rgb(var(--foreground))] font-mono truncate" title={conversation.directoryPath}>
+            {conversation.directoryPath}
+          </div>
+        </div>
+        <button
+          onClick={handleCopyPath}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all ${
+            copiedPath
+              ? 'bg-green-600 text-white'
+              : 'bg-cyan-600 text-white hover:bg-cyan-500'
+          }`}
+          title="Copy path to resume: kiro chat --resume"
+        >
+          {copiedPath ? (
+            <>
+              <Check className="w-3.5 h-3.5" />
+              Copied!
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5" />
+              Copy Path
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
         {conversation.messages.map((msg, idx) => (
           <div key={idx} className="flex gap-3">
             {/* Avatar */}
@@ -170,6 +216,7 @@ export function ConversationDetail({ conversation }: ConversationDetailProps) {
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
