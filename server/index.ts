@@ -5,12 +5,13 @@ import { readFile, stat } from 'fs/promises';
 import { join, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
 import type { DatabaseReader } from './db.js';
+import type { IdeReader } from './ide.js';
 import { parseConversationValue, parseConversationValueSimple } from './parser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface ServerOptions {
-  reader: DatabaseReader;
+  reader: DatabaseReader | IdeReader;
 }
 
 // SSE clients waiting for refresh notifications
@@ -45,25 +46,33 @@ export function createApp(options: ServerOptions): Hono {
   // API: Get conversations (parsed)
   app.get('/api/conversations', (c) => {
     try {
-      if (reader.hasV2Table()) {
-        const v2Conversations = reader.getConversationsV2();
-        const parsed = v2Conversations.map((conv) => {
-          const allMessages = parseConversationValueSimple(conv.key, conv.value);
-          return {
-            directoryPath: conv.key,
-            conversationId: conv.conversationId,
-            messages: allMessages,
-            updatedAt: conv.updatedAt,
-          };
-        }).filter((conv) => conv.messages.length > 0);
+      // Check if this is a DatabaseReader (has hasV2Table method) or IdeReader
+      if ('hasV2Table' in reader) {
+        const dbReader = reader as DatabaseReader;
+        if (dbReader.hasV2Table()) {
+          const v2Conversations = dbReader.getConversationsV2();
+          const parsed = v2Conversations.map((conv) => {
+            const allMessages = parseConversationValueSimple(conv.key, conv.value);
+            return {
+              directoryPath: conv.key,
+              conversationId: conv.conversationId,
+              messages: allMessages,
+              updatedAt: conv.updatedAt,
+            };
+          }).filter((conv) => conv.messages.length > 0);
+          return c.json(parsed);
+        }
+        
+        // Fallback to V1 table
+        const rawConversations = dbReader.getConversations();
+        const parsed = rawConversations
+          .flatMap((conv) => parseConversationValue(conv.key, conv.value));
         return c.json(parsed);
       }
-      
-      // Fallback to V1 table
-      const rawConversations = reader.getConversations();
-      const parsed = rawConversations
-        .flatMap((conv) => parseConversationValue(conv.key, conv.value));
-      return c.json(parsed);
+
+      // IdeReader path
+      const conversations = reader.getConversations();
+      return c.json(conversations);
     } catch (error) {
       console.error('Failed to read conversations:', error);
       return c.json({ error: 'Failed to read database' }, 500);

@@ -7,6 +7,7 @@ export interface ParsedConversation {
   directoryPath: string;
   conversationId: string;
   messages: ConversationMessage[];
+  updatedAt?: number; // Unix timestamp in milliseconds
 }
 
 export interface ToolUse {

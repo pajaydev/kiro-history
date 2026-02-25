@@ -4,9 +4,13 @@ import { homedir, platform } from 'os';
 import { join } from 'path';
 import { Command } from 'commander';
 import { createDatabaseReader } from './db.js';
+import { createIdeReader } from './ide.js';
 import { startServer, notifyClients } from './index.js';
-import { watchFile } from './watcher.js';
+import type { ServerOptions } from './index.js';
+import { watchFile, watchDirectory } from './watcher.js';
 import { openBrowser } from './browser.js';
+
+export type SourceType = 'cli' | 'ide' | 'auto';
 
 export function resolveDbPath(userPath?: string): string {
   if (userPath) {
@@ -30,42 +34,100 @@ export function resolveDbPath(userPath?: string): string {
   }
 }
 
+export function resolveIdePath(userPath?: string): string {
+  if (userPath) {
+    return userPath;
+  }
+
+  const plat = platform();
+
+  if (plat === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
+  } else if (plat === 'linux') {
+    return join(homedir(), '.config', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
+  } else {
+    // Windows
+    const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+    return join(appData, 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
+  }
+}
+
+export function detectSource(): SourceType {
+  const idePath = resolveIdePath();
+  const dbPath = resolveDbPath();
+
+  const hasIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+  const hasCli = existsSync(dbPath);
+
+  if (hasIde && !hasCli) return 'ide';
+  if (hasCli && !hasIde) return 'cli';
+  // Both exist — prefer IDE as it's the newer product
+  if (hasIde) return 'ide';
+  return 'cli';
+}
+
 export async function main(): Promise<void> {
   const program = new Command();
   
   program
     .name('kiro-history')
-    .description('View Kiro CLI command history and chat conversations in your browser')
-    .version('0.1.0')
-    .argument('[path]', 'Path to the kiro CLI database file')
+    .description('View Kiro conversation history in your browser (supports both CLI and IDE)')
+    .version('0.3.1')
+    .argument('[path]', 'Custom path to the database file (CLI) or sessions directory (IDE)')
     .option('-p, --port <number>', 'Port to run the server on (default: auto)')
+    .option('-s, --source <type>', 'Source type: cli, ide, or auto (default: auto)', 'auto')
     .option('--no-open', 'Do not open browser automatically')
-    .action(async (userPath?: string, options?: { port?: string; open?: boolean }) => {
-      const dbPath = resolveDbPath(userPath);
+    .action(async (userPath?: string, options?: { port?: string; open?: boolean; source?: string }) => {
+      const sourceOption = (options?.source || 'auto') as SourceType;
+      const source = sourceOption === 'auto' ? detectSource() : sourceOption;
 
-      // Check if database file exists
-      if (!existsSync(dbPath)) {
-        console.error(`Error: Database file not found at: ${dbPath}`);
-        console.error('Please specify a valid database path as an argument.');
-        process.exit(1);
+      let reader: ServerOptions['reader'];
+      let watchTarget: string;
+      let watcherInstance: { close(): void };
+
+      if (source === 'ide') {
+        const idePath = resolveIdePath(userPath);
+        const wsSessionsDir = join(idePath, 'workspace-sessions');
+
+        if (!existsSync(idePath)) {
+          console.error(`Error: Kiro IDE data not found at: ${idePath}`);
+          console.error('Make sure Kiro IDE is installed, or specify the path as an argument.');
+          process.exit(1);
+        }
+
+        console.log(`Using Kiro IDE sessions: ${idePath}`);
+        reader = createIdeReader(idePath);
+        watchTarget = wsSessionsDir;
+
+        // Watch the workspace-sessions directory for changes
+        watcherInstance = watchDirectory(watchTarget, () => {
+          console.log('Sessions changed, notifying clients...');
+          notifyClients();
+        });
+      } else {
+        const dbPath = resolveDbPath(userPath);
+
+        if (!existsSync(dbPath)) {
+          console.error(`Error: Database file not found at: ${dbPath}`);
+          console.error('Please specify a valid database path as an argument.');
+          process.exit(1);
+        }
+
+        console.log(`Using database: ${dbPath}`);
+        reader = createDatabaseReader(dbPath);
+        watchTarget = dbPath;
+
+        watcherInstance = watchFile(watchTarget, () => {
+          console.log('Database changed, notifying clients...');
+          notifyClients();
+        });
       }
-
-      console.log(`Using database: ${dbPath}`);
-
-      // Initialize database reader
-      const reader = createDatabaseReader(dbPath);
 
       // Start server
       const requestedPort = options?.port ? parseInt(options.port, 10) : 0;
       const { port, close: closeServer } = await startServer({ reader, port: requestedPort });
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
-
-      // Start file watcher
-      const watcher = watchFile(dbPath, () => {
-        console.log('Database changed, notifying clients...');
-        notifyClients();
-      });
 
       // Open browser (unless --no-open)
       if (options?.open !== false) {
@@ -80,7 +142,7 @@ export async function main(): Promise<void> {
       // Setup graceful shutdown handlers
       const cleanup = () => {
         console.log('\nShutting down gracefully...');
-        watcher.close();
+        watcherInstance.close();
         reader.close();
         closeServer();
         process.exit(0);
