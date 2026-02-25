@@ -1,6 +1,6 @@
 # kiro-history
 
-Browse your Kiro CLI conversations in a nice web UI.
+Browse your Kiro conversations in a nice web UI. Supports both Kiro CLI and Kiro IDE.
 
 ## Installation
 
@@ -19,9 +19,10 @@ kiro-history
 kiro-history [path] [options]
 
 Arguments:
-  path                    Custom path to the database file (optional)
+  path                    Custom path to the database file (CLI) or sessions directory (IDE)
 
 Options:
+  -s, --source <type>     Source type: cli, ide, or auto (default: auto)
   -p, --port <number>     Port to run the server on (default: auto)
   --no-open               Do not open browser automatically
   -V, --version           Show version number
@@ -31,8 +32,14 @@ Options:
 ## Examples
 
 ```bash
-# Default usage - auto-detect database, open browser
+# Default usage - auto-detects CLI or IDE, opens browser
 npx kiro-history
+
+# Explicitly use Kiro IDE conversations
+npx kiro-history --source ide
+
+# Explicitly use Kiro CLI conversations
+npx kiro-history --source cli
 
 # Use a specific port
 npx kiro-history -p 3000
@@ -40,8 +47,11 @@ npx kiro-history -p 3000
 # Don't open browser automatically
 npx kiro-history --no-open
 
-# Use a custom database path
+# Use a custom database path (CLI mode)
 npx kiro-history ~/path/to/data.sqlite3
+
+# Use a custom sessions directory (IDE mode)
+npx kiro-history --source ide ~/path/to/kiro.kiroagent
 ```
 
 ## Features
@@ -52,7 +62,9 @@ npx kiro-history ~/path/to/data.sqlite3
 
 ## How it works
 
-Kiro CLI automatically saves all conversations to a local SQLite database. This tool reads that database and displays your chat history in a clean, browsable format.
+Kiro CLI saves conversations to a local SQLite database, while Kiro IDE stores them as JSON files in its global storage directory. This tool reads from either source and displays your chat history in a clean, browsable format.
+
+When using `--source auto` (the default), the tool checks for both data sources and picks whichever is available. If both exist, it prefers the IDE.
 
 ## License
 
