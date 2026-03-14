@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { User, Sparkles, ChevronDown, ChevronRight, Wrench, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { ParsedConversation, ToolUse } from '../types';
@@ -140,6 +141,7 @@ export function ConversationDetail({ conversation }: ConversationDetailProps) {
                 ) : (
                   <>
                     <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
                       components={{
                         code({ className, children, ...props }) {
                           const match = /language-(\w+)/.exec(className || '');
@@ -201,6 +203,38 @@ export function ConversationDetail({ conversation }: ConversationDetailProps) {
                             <blockquote className="border-l-2 border-[rgb(var(--foreground-muted))] pl-4 italic my-2">
                               {children}
                             </blockquote>
+                          );
+                        },
+                        table({ children }) {
+                          return (
+                            <div className="overflow-x-auto my-4">
+                              <table className="min-w-full border-collapse border border-[rgb(var(--border))]">
+                                {children}
+                              </table>
+                            </div>
+                          );
+                        },
+                        thead({ children }) {
+                          return <thead className="bg-[rgb(var(--background-hover))]">{children}</thead>;
+                        },
+                        tbody({ children }) {
+                          return <tbody>{children}</tbody>;
+                        },
+                        tr({ children }) {
+                          return <tr className="border-b border-[rgb(var(--border))]">{children}</tr>;
+                        },
+                        th({ children }) {
+                          return (
+                            <th className="px-4 py-2 text-left font-semibold border border-[rgb(var(--border))]">
+                              {children}
+                            </th>
+                          );
+                        },
+                        td({ children }) {
+                          return (
+                            <td className="px-4 py-2 border border-[rgb(var(--border))]">
+                              {children}
+                            </td>
                           );
                         },
                       }}

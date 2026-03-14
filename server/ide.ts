@@ -533,7 +533,10 @@ export function createIdeReader(basePath: string): IdeReader {
           let sessions: IdeSessionIndex[] = [];
           try {
             sessions = JSON.parse(readFileSync(sessionsIndex, 'utf-8'));
-          } catch {
+            // Filter out hidden sessions
+            sessions = sessions.filter(s => !s.hidden);
+          } catch (err) {
+            console.warn(`Failed to parse sessions.json in ${wsDirPath}:`, err);
             continue;
           }
 
@@ -584,29 +587,29 @@ export function createIdeReader(basePath: string): IdeReader {
                   responseText = raw || '';
                 }
 
-                if (responseText || toolUses) {
-                  messages.push({
-                    role: 'assistant',
-                    content: responseText,
-                    ...(toolUses ? { toolUses } : {}),
-                  });
-                }
+                // Include assistant message even if empty (might be in progress)
+                messages.push({
+                  role: 'assistant',
+                  content: responseText,
+                  ...(toolUses ? { toolUses } : {}),
+                });
               }
             }
 
-            if (messages.length === 0) continue;
+            // Include conversations even with just a user message (might be waiting for response)
+            if (messages.length > 0) {
+              const dirPath = sessionData.workspacePath
+                || sessionData.workspaceDirectory
+                || workspacePath
+                || session.workspaceDirectory;
 
-            const dirPath = sessionData.workspacePath
-              || sessionData.workspaceDirectory
-              || workspacePath
-              || session.workspaceDirectory;
-
-            allConversations.push({
-              directoryPath: dirPath || wsDir.name,
-              conversationId: session.sessionId,
-              messages,
-              updatedAt: session.dateCreated ? parseInt(session.dateCreated, 10) : undefined,
-            });
+              allConversations.push({
+                directoryPath: dirPath || wsDir.name,
+                conversationId: session.sessionId,
+                messages,
+                updatedAt: session.dateCreated ? parseInt(session.dateCreated, 10) : undefined,
+              });
+            }
           }
         }
       }

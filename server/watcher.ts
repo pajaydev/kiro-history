@@ -61,7 +61,7 @@ export function watchDirectory(
     }
     debounceTimer = setTimeout(() => {
       onChange();
-    }, 1000); // 1s debounce for directory watching
+    }, 300); // 300ms debounce for directory watching (reduced from 1s for faster updates)
   };
 
   try {

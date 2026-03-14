@@ -52,7 +52,7 @@ export function resolveIdePath(userPath?: string): string {
   }
 }
 
-export function detectSource(): SourceType {
+export function detectSource(): 'cli' | 'ide' {
   const idePath = resolveIdePath();
   const dbPath = resolveDbPath();
 
@@ -61,9 +61,9 @@ export function detectSource(): SourceType {
 
   if (hasIde && !hasCli) return 'ide';
   if (hasCli && !hasIde) return 'cli';
-  // Both exist — prefer IDE as it's the newer product
-  if (hasIde) return 'ide';
-  return 'cli';
+  // Both exist — prefer CLI as default
+  if (hasCli) return 'cli';
+  return 'ide';
 }
 
 export async function main(): Promise<void> {
@@ -79,14 +79,21 @@ export async function main(): Promise<void> {
     .option('--no-open', 'Do not open browser automatically')
     .action(async (userPath?: string, options?: { port?: string; open?: boolean; source?: string }) => {
       const sourceOption = (options?.source || 'auto') as SourceType;
-      const source = sourceOption === 'auto' ? detectSource() : sourceOption;
+      const source = sourceOption === 'auto' ? detectSource() : sourceOption as 'cli' | 'ide';
 
       let reader: ServerOptions['reader'];
+      let alternateReader: ServerOptions['alternateReader'];
+      let alternateSourceType: ServerOptions['alternateSourceType'];
       let watchTarget: string;
       let watcherInstance: { close(): void };
 
+      // Try to load both sources if available
+      const idePath = resolveIdePath(userPath);
+      const dbPath = resolveDbPath(userPath);
+      const hasIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+      const hasCli = existsSync(dbPath);
+
       if (source === 'ide') {
-        const idePath = resolveIdePath(userPath);
         const wsSessionsDir = join(idePath, 'workspace-sessions');
 
         if (!existsSync(idePath)) {
@@ -99,13 +106,19 @@ export async function main(): Promise<void> {
         reader = createIdeReader(idePath);
         watchTarget = wsSessionsDir;
 
+        // Load CLI as alternate if available
+        if (hasCli) {
+          console.log(`Also found CLI database: ${dbPath}`);
+          alternateReader = createDatabaseReader(dbPath);
+          alternateSourceType = 'cli';
+        }
+
         // Watch the workspace-sessions directory for changes
         watcherInstance = watchDirectory(watchTarget, () => {
           console.log('Sessions changed, notifying clients...');
           notifyClients();
         });
       } else {
-        const dbPath = resolveDbPath(userPath);
 
         if (!existsSync(dbPath)) {
           console.error(`Error: Database file not found at: ${dbPath}`);
@@ -117,6 +130,13 @@ export async function main(): Promise<void> {
         reader = createDatabaseReader(dbPath);
         watchTarget = dbPath;
 
+        // Load IDE as alternate if available
+        if (hasIde) {
+          console.log(`Also found IDE sessions: ${idePath}`);
+          alternateReader = createIdeReader(idePath);
+          alternateSourceType = 'ide';
+        }
+
         watcherInstance = watchFile(watchTarget, () => {
           console.log('Database changed, notifying clients...');
           notifyClients();
@@ -125,7 +145,13 @@ export async function main(): Promise<void> {
 
       // Start server
       const requestedPort = options?.port ? parseInt(options.port, 10) : 0;
-      const { port, close: closeServer } = await startServer({ reader, port: requestedPort });
+      const { port, close: closeServer } = await startServer({ 
+        reader, 
+        port: requestedPort,
+        sourceType: source,
+        alternateReader,
+        alternateSourceType
+      });
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
 
