@@ -35,15 +35,7 @@ function formatDate(timestamp?: number): string {
 }
 
 export function ConversationList({ conversations, loading, selectedPath, onSelect }: ConversationListProps) {
-  if (loading) {
-    return (
-      <div className="w-[35%] min-w-[280px] max-w-[400px] border-r border-[rgb(var(--border))] p-4">
-        <div className="text-[rgb(var(--foreground-muted))] text-sm">Loading...</div>
-      </div>
-    );
-  }
-
-  if (conversations.length === 0) {
+  if (conversations.length === 0 && !loading) {
     return (
       <div className="w-[35%] min-w-[280px] max-w-[400px] border-r border-[rgb(var(--border))] p-4">
         <div className="text-[rgb(var(--foreground-muted))] text-sm">No conversations found</div>

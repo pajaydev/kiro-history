@@ -12,6 +12,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface ServerOptions {
   reader: DatabaseReader | IdeReader;
+  sourceType: 'cli' | 'ide';
+  alternateReader?: DatabaseReader | IdeReader;
+  alternateSourceType?: 'cli' | 'ide';
 }
 
 // SSE clients waiting for refresh notifications
@@ -35,7 +38,7 @@ const MIME_TYPES: Record<string, string> = {
 
 export function createApp(options: ServerOptions): Hono {
   const app = new Hono();
-  const { reader } = options;
+  const { reader, sourceType, alternateReader, alternateSourceType } = options;
 
   // Error handling middleware
   app.onError((err, c) => {
@@ -43,12 +46,33 @@ export function createApp(options: ServerOptions): Hono {
     return c.json({ error: 'Internal server error' }, 500);
   });
 
+  // API: Get available sources
+  app.get('/api/sources', (c) => {
+    const sources = [sourceType];
+    if (alternateReader && alternateSourceType) {
+      sources.push(alternateSourceType);
+    }
+    return c.json({ 
+      sources,
+      default: sourceType 
+    });
+  });
+
   // API: Get conversations (parsed)
   app.get('/api/conversations', (c) => {
     try {
+      // Check if source parameter is provided
+      const requestedSource = c.req.query('source') as 'cli' | 'ide' | undefined;
+      
+      // Determine which reader to use
+      let activeReader = reader;
+      if (requestedSource && requestedSource !== sourceType && alternateReader) {
+        activeReader = alternateReader;
+      }
+
       // Check if this is a DatabaseReader (has hasV2Table method) or IdeReader
-      if ('hasV2Table' in reader) {
-        const dbReader = reader as DatabaseReader;
+      if ('hasV2Table' in activeReader) {
+        const dbReader = activeReader as DatabaseReader;
         if (dbReader.hasV2Table()) {
           const v2Conversations = dbReader.getConversationsV2();
           const parsed = v2Conversations.map((conv) => {
@@ -71,7 +95,7 @@ export function createApp(options: ServerOptions): Hono {
       }
 
       // IdeReader path
-      const conversations = reader.getConversations();
+      const conversations = activeReader.getConversations();
       return c.json(conversations);
     } catch (error) {
       console.error('Failed to read conversations:', error);
