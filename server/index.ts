@@ -6,6 +6,7 @@ import { join, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
 import type { DatabaseReader } from './db.js';
 import type { IdeReader } from './ide.js';
+import type { CliV2Reader } from './cli-v2.js';
 import { parseConversationValue, parseConversationValueSimple } from './parser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,7 @@ export interface ServerOptions {
   sourceType: 'cli' | 'ide';
   alternateReader?: DatabaseReader | IdeReader;
   alternateSourceType?: 'cli' | 'ide';
+  cliV2Reader?: CliV2Reader;
 }
 
 // SSE clients waiting for refresh notifications
@@ -38,7 +40,7 @@ const MIME_TYPES: Record<string, string> = {
 
 export function createApp(options: ServerOptions): Hono {
   const app = new Hono();
-  const { reader, sourceType, alternateReader, alternateSourceType } = options;
+  const { reader, sourceType, alternateReader, alternateSourceType, cliV2Reader } = options;
 
   // Error handling middleware
   app.onError((err, c) => {
@@ -73,9 +75,11 @@ export function createApp(options: ServerOptions): Hono {
       // Check if this is a DatabaseReader (has hasV2Table method) or IdeReader
       if ('hasV2Table' in activeReader) {
         const dbReader = activeReader as DatabaseReader;
+        let parsed: { directoryPath: string; conversationId: string; messages: ReturnType<typeof parseConversationValueSimple>; updatedAt?: number }[] = [];
+
         if (dbReader.hasV2Table()) {
           const v2Conversations = dbReader.getConversationsV2();
-          const parsed = v2Conversations.map((conv) => {
+          parsed = v2Conversations.map((conv) => {
             const allMessages = parseConversationValueSimple(conv.key, conv.value);
             return {
               directoryPath: conv.key,
@@ -84,13 +88,26 @@ export function createApp(options: ServerOptions): Hono {
               updatedAt: conv.updatedAt,
             };
           }).filter((conv) => conv.messages.length > 0);
-          return c.json(parsed);
+        } else {
+          // Fallback to V1 table
+          const rawConversations = dbReader.getConversations();
+          parsed = rawConversations
+            .flatMap((conv) => parseConversationValue(conv.key, conv.value));
         }
-        
-        // Fallback to V1 table
-        const rawConversations = dbReader.getConversations();
-        const parsed = rawConversations
-          .flatMap((conv) => parseConversationValue(conv.key, conv.value));
+
+        // Merge V2 flat file sessions if available
+        if (cliV2Reader) {
+          const v2FlatConversations = cliV2Reader.getConversations();
+          const existingIds = new Set(parsed.map(c => c.conversationId));
+          for (const conv of v2FlatConversations) {
+            if (!existingIds.has(conv.conversationId)) {
+              parsed.push(conv);
+            }
+          }
+          // Re-sort by recency after merge
+          parsed.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        }
+
         return c.json(parsed);
       }
 
