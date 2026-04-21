@@ -5,6 +5,7 @@ import { join } from 'path';
 import { Command } from 'commander';
 import { createDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
+import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
 import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
@@ -145,12 +146,26 @@ export async function main(): Promise<void> {
 
       // Start server
       const requestedPort = options?.port ? parseInt(options.port, 10) : 0;
+
+      // Create V2 flat file reader for CLI sessions
+      const cliV2Path = resolveCliV2Path();
+      const cliV2Reader = existsSync(cliV2Path) ? createCliV2Reader(cliV2Path) : undefined;
+      let cliV2Watcher: { close(): void } | undefined;
+      if (cliV2Reader) {
+        console.log(`Also found CLI V2 sessions: ${cliV2Path}`);
+        cliV2Watcher = watchDirectory(cliV2Path, () => {
+          console.log('CLI V2 sessions changed, notifying clients...');
+          notifyClients();
+        });
+      }
+
       const { port, close: closeServer } = await startServer({ 
         reader, 
         port: requestedPort,
         sourceType: source,
         alternateReader,
-        alternateSourceType
+        alternateSourceType,
+        cliV2Reader,
       });
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
@@ -169,7 +184,9 @@ export async function main(): Promise<void> {
       const cleanup = () => {
         console.log('\nShutting down gracefully...');
         watcherInstance.close();
+        if (cliV2Watcher) cliV2Watcher.close();
         reader.close();
+        if (cliV2Reader) cliV2Reader.close();
         closeServer();
         process.exit(0);
       };
