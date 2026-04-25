@@ -1,14 +1,14 @@
-# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
-# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
-
-name: Node.js Package
+name: Release & Publish
 
 on:
-  release:
-    types: [created]
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,18 +16,53 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm test
+      - run: npm run build
+      - run: npm test -- --run
 
-  publish-npm:
-    needs: build
+  release:
+    needs: build-and-test
     runs-on: ubuntu-latest
+    # Only release when package.json version changes
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
-      - run: npm ci
-      - run: npm publish
+
+      - name: Check version change
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          git show HEAD~1:package.json > /tmp/prev-package.json 2>/dev/null || echo '{"version":"0.0.0"}' > /tmp/prev-package.json
+          PREVIOUS=$(node -p "require('/tmp/prev-package.json').version")
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          gh release create "v${{ steps.version.outputs.current }}" \
+            --title "v${{ steps.version.outputs.current }}" \
+            --generate-notes
         env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        if: steps.version.outputs.changed == 'true'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm_token }}
