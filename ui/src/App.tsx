@@ -3,7 +3,7 @@ import { useConversations } from './hooks/useConversations';
 import { ConversationList } from './components/ConversationList';
 import { ConversationDetail } from './components/ConversationDetail';
 import { SearchBar } from './components/SearchBar';
-import { Terminal, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
+import { Terminal, Sparkles, RefreshCw, Loader2, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2 } from 'lucide-react';
 import type { ParsedConversation } from './types';
 
 export function App() {
@@ -13,7 +13,17 @@ export function App() {
   const [availableSources, setAvailableSources] = useState<('cli' | 'ide')[]>([]);
   const [isSwitching, setIsSwitching] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<'cli' | 'ide' | null>(null);
-  const { conversations, loading, refetch } = useConversations(currentSource || undefined);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const { conversations, loading } = useConversations(currentSource || undefined);
+
+  // Clear switching state when loading finishes
+  useEffect(() => {
+    if (!loading && isSwitching) {
+      setIsSwitching(false);
+      setSwitchingTo(null);
+    }
+  }, [loading, isSwitching]);
 
   useEffect(() => {
     fetch('/api/sources')
@@ -29,11 +39,9 @@ export function App() {
     const newSource = currentSource === 'cli' ? 'ide' : 'cli';
     setIsSwitching(true);
     setSwitchingTo(newSource);
-    setCurrentSource(newSource);
     setSelectedConversation(null);
-    await refetch(newSource);
-    setIsSwitching(false);
-    setSwitchingTo(null);
+    // Set source and let the useEffect handle the fetch
+    setCurrentSource(newSource);
   };
 
   const filteredConversations = conversations.filter((conv) =>
@@ -62,73 +70,109 @@ export function App() {
       )}
 
       {/* Top bar */}
-      <header className="flex items-center gap-4 px-4 py-3 border-b border-[rgb(var(--border))] bg-[rgb(var(--background-card))]">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-[rgb(var(--foreground))]">Kiro History</span>
-          {currentSource && (
-            <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${
-              currentSource === 'ide' 
-                ? 'bg-purple-600/20 text-purple-400 border border-purple-600/30' 
-                : 'bg-cyan-600/20 text-cyan-400 border border-cyan-600/30'
-            }`}>
-              {currentSource === 'ide' ? (
-                <>
-                  <Sparkles className="w-3 h-3" />
-                  IDE
-                </>
-              ) : (
-                <>
-                  <Terminal className="w-3 h-3" />
-                  CLI
-                </>
-              )}
-            </div>
-          )}
-          {canSwitch && currentSource && (
+      {!fullscreen && (
+        <header className="flex items-center gap-4 px-4 py-3 border-b border-[rgb(var(--border))] bg-[rgb(var(--background-card))]">
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleSourceSwitch}
-              disabled={isSwitching}
-              className="group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-gradient-to-r from-cyan-600/10 to-purple-600/10 hover:from-cyan-600/20 hover:to-purple-600/20 text-[rgb(var(--foreground))] transition-all duration-200 border border-[rgb(var(--border))] hover:border-cyan-500/50 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              title={`Switch to ${currentSource === 'cli' ? 'IDE' : 'CLI'}`}
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
+              title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+              aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
             >
-              {isSwitching ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3.5 h-3.5 group-hover:rotate-180 transition-transform duration-500" />
-              )}
-              <span>Switch to</span>
-              {currentSource === 'cli' ? (
-                <span className="flex items-center gap-1 text-purple-400">
-                  <Sparkles className="w-3 h-3" />
-                  IDE
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-cyan-400">
-                  <Terminal className="w-3 h-3" />
-                  CLI
-                </span>
-              )}
+              {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             </button>
-          )}
-        </div>
-        <SearchBar
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search conversations..."
-        />
-        <span className="text-xs text-[rgb(var(--foreground-muted))]">
-          {conversations.length} conversations
-        </span>
-      </header>
+            <span className="font-semibold text-[rgb(var(--foreground))]">Kiro History</span>
+            {currentSource && (
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${
+                currentSource === 'ide' 
+                  ? 'bg-purple-600/20 text-purple-400 border border-purple-600/30' 
+                  : 'bg-cyan-600/20 text-cyan-400 border border-cyan-600/30'
+              }`}>
+                {currentSource === 'ide' ? (
+                  <>
+                    <Sparkles className="w-3 h-3" />
+                    IDE
+                  </>
+                ) : (
+                  <>
+                    <Terminal className="w-3 h-3" />
+                    CLI
+                  </>
+                )}
+              </div>
+            )}
+            {canSwitch && currentSource && (
+              <button
+                onClick={handleSourceSwitch}
+                disabled={isSwitching}
+                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-gradient-to-r from-cyan-600/10 to-purple-600/10 hover:from-cyan-600/20 hover:to-purple-600/20 text-[rgb(var(--foreground))] transition-all duration-200 border border-[rgb(var(--border))] hover:border-cyan-500/50 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title={`Switch to ${currentSource === 'cli' ? 'IDE' : 'CLI'}`}
+              >
+                {isSwitching ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5 group-hover:rotate-180 transition-transform duration-500" />
+                )}
+                <span>Switch to</span>
+                {currentSource === 'cli' ? (
+                  <span className="flex items-center gap-1 text-purple-400">
+                    <Sparkles className="w-3 h-3" />
+                    IDE
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-cyan-400">
+                    <Terminal className="w-3 h-3" />
+                    CLI
+                  </span>
+                )}
+              </button>
+            )}
+          </div>
+          <SearchBar
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search conversations..."
+          />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[rgb(var(--foreground-muted))]">
+              {conversations.length} conversations
+            </span>
+            {selectedConversation && (
+              <button
+                onClick={() => setFullscreen(true)}
+                className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
+                title="Fullscreen"
+                aria-label="Enter fullscreen mode"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </header>
+      )}
+
+      {/* Fullscreen exit button */}
+      {fullscreen && (
+        <button
+          onClick={() => setFullscreen(false)}
+          className="fixed top-3 right-3 z-50 p-2 rounded-md bg-[rgb(var(--background-card))] border border-[rgb(var(--border))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground-muted))] hover:text-[rgb(var(--foreground))] transition-colors shadow-lg"
+          title="Exit fullscreen"
+          aria-label="Exit fullscreen mode"
+        >
+          <Minimize2 className="w-4 h-4" />
+        </button>
+      )}
 
       {/* Main content */}
       <main className="flex-1 flex overflow-hidden">
-        <ConversationList
-          conversations={filteredConversations}
-          loading={false}
-          selectedPath={selectedConversation?.conversationId}
-          onSelect={setSelectedConversation}
-        />
+        {!sidebarCollapsed && !fullscreen && (
+          <ConversationList
+            conversations={filteredConversations}
+            loading={false}
+            selectedPath={selectedConversation?.conversationId}
+            onSelect={setSelectedConversation}
+          />
+        )}
         <ConversationDetail conversation={selectedConversation} />
       </main>
     </div>
