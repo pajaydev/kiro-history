@@ -3,7 +3,7 @@ import { useConversations } from './hooks/useConversations';
 import { ConversationList } from './components/ConversationList';
 import { ConversationDetail } from './components/ConversationDetail';
 import { SearchBar } from './components/SearchBar';
-import { Terminal, Sparkles, RefreshCw, Loader2, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2 } from 'lucide-react';
+import { Terminal, Sparkles, Loader2, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, Copy, Check, TerminalSquare } from 'lucide-react';
 import type { ParsedConversation } from './types';
 
 export function App() {
@@ -15,7 +15,27 @@ export function App() {
   const [switchingTo, setSwitchingTo] = useState<'cli' | 'ide' | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const { conversations, loading } = useConversations(currentSource || undefined);
+
+  // The CLI can resume a session by id (`kiro-cli chat --resume-id <id>`).
+  // IDE sessions have no CLI resume path, so we fall back to copying the directory.
+  const canResume = currentSource === 'cli' && !!selectedConversation?.conversationId;
+  const resumeCommand = selectedConversation
+    ? `kiro-cli chat --resume-id ${selectedConversation.conversationId}`
+    : '';
+
+  const handleCopy = async () => {
+    if (!selectedConversation) return;
+    const text = canResume ? resumeCommand : selectedConversation.directoryPath;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   // Clear switching state when loading finishes
   useEffect(() => {
@@ -35,8 +55,9 @@ export function App() {
       .catch(err => console.error('Failed to fetch sources:', err));
   }, []);
 
-  const handleSourceSwitch = async () => {
-    const newSource = currentSource === 'cli' ? 'ide' : 'cli';
+  const handleSourceSwitch = async (target?: 'cli' | 'ide') => {
+    const newSource = target ?? (currentSource === 'cli' ? 'ide' : 'cli');
+    if (newSource === currentSource || isSwitching) return;
     setIsSwitching(true);
     setSwitchingTo(newSource);
     setSelectedConversation(null);
@@ -82,50 +103,52 @@ export function App() {
               {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             </button>
             <span className="font-semibold text-[rgb(var(--foreground))]">Kiro History</span>
-            {currentSource && (
-              <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${
-                currentSource === 'ide' 
-                  ? 'bg-purple-600/20 text-purple-400 border border-purple-600/30' 
-                  : 'bg-cyan-600/20 text-cyan-400 border border-cyan-600/30'
-              }`}>
-                {currentSource === 'ide' ? (
-                  <>
-                    <Sparkles className="w-3 h-3" />
-                    IDE
-                  </>
-                ) : (
-                  <>
-                    <Terminal className="w-3 h-3" />
-                    CLI
-                  </>
-                )}
+            {/* Source: segmented toggle when both are available, static badge otherwise */}
+            {currentSource && canSwitch && (
+              <div
+                role="tablist"
+                aria-label="Conversation source"
+                className="flex items-center p-0.5 rounded-md bg-[rgb(var(--background))] border border-[rgb(var(--border))]"
+              >
+                {(['cli', 'ide'] as const).map((src) => {
+                  const active = currentSource === src;
+                  const Icon = src === 'ide' ? Sparkles : Terminal;
+                  return (
+                    <button
+                      key={src}
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => handleSourceSwitch(src)}
+                      disabled={isSwitching}
+                      title={active ? `Viewing ${src.toUpperCase()} conversations` : `Switch to ${src.toUpperCase()}`}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed ${
+                        active
+                          ? src === 'ide'
+                            ? 'bg-purple-600/20 text-purple-400 shadow-sm'
+                            : 'bg-cyan-600/20 text-cyan-400 shadow-sm'
+                          : 'text-[rgb(var(--foreground-muted))] hover:text-[rgb(var(--foreground))]'
+                      }`}
+                    >
+                      {isSwitching && switchingTo === src ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Icon className="w-3 h-3" />
+                      )}
+                      {src.toUpperCase()}
+                    </button>
+                  );
+                })}
               </div>
             )}
-            {canSwitch && currentSource && (
-              <button
-                onClick={handleSourceSwitch}
-                disabled={isSwitching}
-                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-gradient-to-r from-cyan-600/10 to-purple-600/10 hover:from-cyan-600/20 hover:to-purple-600/20 text-[rgb(var(--foreground))] transition-all duration-200 border border-[rgb(var(--border))] hover:border-cyan-500/50 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title={`Switch to ${currentSource === 'cli' ? 'IDE' : 'CLI'}`}
-              >
-                {isSwitching ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3.5 h-3.5 group-hover:rotate-180 transition-transform duration-500" />
-                )}
-                <span>Switch to</span>
-                {currentSource === 'cli' ? (
-                  <span className="flex items-center gap-1 text-purple-400">
-                    <Sparkles className="w-3 h-3" />
-                    IDE
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-cyan-400">
-                    <Terminal className="w-3 h-3" />
-                    CLI
-                  </span>
-                )}
-              </button>
+            {currentSource && !canSwitch && (
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${
+                currentSource === 'ide'
+                  ? 'bg-purple-600/20 text-purple-400 border border-purple-600/30'
+                  : 'bg-cyan-600/20 text-cyan-400 border border-cyan-600/30'
+              }`}>
+                {currentSource === 'ide' ? <Sparkles className="w-3 h-3" /> : <Terminal className="w-3 h-3" />}
+                {currentSource.toUpperCase()}
+              </div>
             )}
           </div>
           <SearchBar
@@ -134,18 +157,46 @@ export function App() {
             placeholder="Search conversations..."
           />
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[rgb(var(--foreground-muted))]">
+            <span className="text-xs text-[rgb(var(--foreground-muted))] whitespace-nowrap">
               {conversations.length} conversations
             </span>
             {selectedConversation && (
-              <button
-                onClick={() => setFullscreen(true)}
-                className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
-                title="Fullscreen"
-                aria-label="Enter fullscreen mode"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
+              <>
+                <button
+                  onClick={handleCopy}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+                    copied
+                      ? 'border-green-500/40 bg-green-500/15 text-green-400'
+                      : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 hover:border-cyan-400/60'
+                  }`}
+                  title={canResume ? `Copy resume command: ${resumeCommand}` : 'Copy directory path'}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      Copied!
+                    </>
+                  ) : canResume ? (
+                    <>
+                      <TerminalSquare className="w-3.5 h-3.5" />
+                      Copy resume command
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy path
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setFullscreen(true)}
+                  className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
+                  title="Fullscreen"
+                  aria-label="Enter fullscreen mode"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                </button>
+              </>
             )}
           </div>
         </header>

@@ -20,4 +20,17 @@
   code, pre {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
   }
+
+  /* Tailwind v4 Preflight sets buttons to `cursor: default`; restore the
+     pointer for interactive elements, keeping disabled ones as not-allowed. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
