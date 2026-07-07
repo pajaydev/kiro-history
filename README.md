@@ -1,19 +1,36 @@
-# kiro-history
+<div align="center">
 
-[![npm version](https://img.shields.io/npm/v/kiro-history.svg)](https://www.npmjs.com/package/kiro-history)
-[![npm downloads](https://img.shields.io/npm/dm/kiro-history.svg)](https://www.npmjs.com/package/kiro-history)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+# 🗂️ Kiro History
 
-> Browse your Kiro conversations in a beautiful web UI. Supports both Kiro CLI and Kiro IDE.
+**Browse your Kiro conversations in a beautiful web UI — supports both Kiro CLI and Kiro IDE.**
+
+[![npm version](https://img.shields.io/npm/v/kiro-history.svg?style=flat-square&color=cyan)](https://www.npmjs.com/package/kiro-history)
+[![npm downloads](https://img.shields.io/npm/dm/kiro-history.svg?style=flat-square&color=blue)](https://www.npmjs.com/package/kiro-history)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+
+```bash
+npx kiro-history
+```
+
+</div>
+
+<!--
+📸 Add a screenshot or GIF here to showcase the UI, e.g.:
+<div align="center">
+  <img src="assets/screenshot.png" alt="Kiro History UI" width="900" />
+</div>
+-->
 
 ## ✨ Features
 
-- 🔍 **Search** - Find conversations instantly across all your history
-- 📝 **Markdown Support** - Properly rendered markdown with syntax-highlighted code blocks and tables
-- 🔧 **Tool Details** - Collapsible tool usage information for each assistant response
-- 🔄 **Live Updates** - Automatically refreshes when new conversations are added
-- 🎨 **Clean UI** - Modern, responsive interface with dark theme
-- 🚀 **Source Switching** - Toggle between CLI and IDE conversations when both are available
+- 🔍 **Search** — Find conversations instantly across all your history
+- 📝 **Markdown Support** — Rendered markdown with syntax-highlighted code blocks and tables
+- 🔧 **Tool Details** — Collapsible tool usage information for each assistant response
+- 🔄 **Live Updates** — Automatically refreshes when new conversations are added
+- 🚀 **Resume Sessions** — Copy a ready-to-run `kiro-cli chat --resume-id` command for any CLI conversation
+- 🔀 **Source Switching** — Segmented toggle to flip between CLI and IDE conversations
+- 🖥️ **Fullscreen & Collapsible Sidebar** — Focus on a single conversation or reclaim screen space
+- 🎨 **Clean UI** — Modern, responsive interface with a dark theme
 
 ## 🚀 Quick Start
 
