@@ -64,6 +64,9 @@ kiro-history -p 3000
 
 # Don't open browser automatically
 kiro-history --no-open
+
+# Listen on all interfaces (accessible from other devices on your network)
+kiro-history --host 0.0.0.0
 ```
 
 ### Source Selection
@@ -96,6 +99,7 @@ kiro-history --source ide ~/path/to/kiro.kiroagent
 | `path` | Custom path to database file (CLI) or sessions directory (IDE) | Auto-detected |
 | `-s, --source <type>` | Source type: `cli`, `ide`, or `auto` | `auto` |
 | `-p, --port <number>` | Port to run the server on | Random available port |
+| `--host <address>` | Host address to bind to | `127.0.0.1` |
 | `--no-open` | Don't open browser automatically | Opens browser |
 | `-V, --version` | Show version number | - |
 | `-h, --help` | Show help | - |

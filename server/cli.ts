@@ -77,8 +77,9 @@ export async function main(): Promise<void> {
     .argument('[path]', 'Custom path to the database file (CLI) or sessions directory (IDE)')
     .option('-p, --port <number>', 'Port to run the server on (default: auto)')
     .option('-s, --source <type>', 'Source type: cli, ide, or auto (default: auto)', 'auto')
+    .option('--host <address>', 'Host address to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--no-open', 'Do not open browser automatically')
-    .action(async (userPath?: string, options?: { port?: string; open?: boolean; source?: string }) => {
+    .action(async (userPath?: string, options?: { port?: string; open?: boolean; source?: string; host?: string }) => {
       const sourceOption = (options?.source || 'auto') as SourceType;
       const source = sourceOption === 'auto' ? detectSource() : sourceOption as 'cli' | 'ide';
 
@@ -162,6 +163,7 @@ export async function main(): Promise<void> {
       const { port, close: closeServer } = await startServer({ 
         reader, 
         port: requestedPort,
+        hostname: options?.host,
         sourceType: source,
         alternateReader,
         alternateSourceType,

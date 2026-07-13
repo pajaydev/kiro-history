@@ -179,14 +179,16 @@ export function createApp(options: ServerOptions): Hono {
 }
 
 export async function startServer(
-  options: ServerOptions & { port?: number }
+  options: ServerOptions & { port?: number; hostname?: string }
 ): Promise<{ port: number; close: () => void }> {
   const app = createApp(options);
+  const hostname = options.hostname || '127.0.0.1';
 
   return new Promise((resolve) => {
     const server = serve({
       fetch: app.fetch,
       port: options.port || 0, // Use specified port or let OS assign
+      hostname,
     }, (info) => {
       resolve({
         port: info.port,
