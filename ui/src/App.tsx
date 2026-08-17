@@ -224,7 +224,7 @@ export function App() {
             onSelect={setSelectedConversation}
           />
         )}
-        <ConversationDetail conversation={selectedConversation} />
+        <ConversationDetail conversation={selectedConversation} searchQuery={searchQuery} />
       </main>
     </div>
   );
