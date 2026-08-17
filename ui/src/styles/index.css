@@ -21,6 +21,15 @@
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
   }
 
+  /* Search highlight for in-session text matches */
+  mark.search-highlight {
+    background-color: rgb(217 119 6 / 0.45);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    scroll-margin-top: 4rem;
+  }
+
   /* Tailwind v4 Preflight sets buttons to `cursor: default`; restore the
      pointer for interactive elements, keeping disabled ones as not-allowed. */
   button:not(:disabled),
