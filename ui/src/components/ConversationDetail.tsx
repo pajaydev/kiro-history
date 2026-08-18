@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { User, Sparkles, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +8,7 @@ import type { ParsedConversation, ToolUse } from '../types';
 
 interface ConversationDetailProps {
   conversation: ParsedConversation | null;
+  searchQuery?: string;
 }
 
 function ToolUseBadges({ toolUses }: { toolUses: ToolUse[] }) {
@@ -45,7 +46,106 @@ function ToolUseBadges({ toolUses }: { toolUses: ToolUse[] }) {
   );
 }
 
-export function ConversationDetail({ conversation }: ConversationDetailProps) {
+/**
+ * Walk all text nodes within a container and wrap case-insensitive matches
+ * of `query` with <mark class="search-highlight"> elements.
+ * Returns the total number of matches found.
+ */
+function highlightTextNodes(container: HTMLElement, query: string): number {
+  if (!query) return 0;
+
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escapedQuery})`, 'gi');
+  let matchCount = 0;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const textNodes: Text[] = [];
+
+  // Collect text nodes first (modifying DOM during walk is unsafe)
+  let node = walker.nextNode();
+  while (node) {
+    textNodes.push(node as Text);
+    node = walker.nextNode();
+  }
+
+  for (const textNode of textNodes) {
+    const text = textNode.nodeValue;
+    if (!text || !regex.test(text)) {
+      regex.lastIndex = 0;
+      continue;
+    }
+    regex.lastIndex = 0;
+
+    // Split text by matches and build replacement fragment
+    const parts = text.split(regex);
+    if (parts.length <= 1) continue;
+
+    const fragment = document.createDocumentFragment();
+    for (const part of parts) {
+      if (regex.test(part)) {
+        regex.lastIndex = 0;
+        const mark = document.createElement('mark');
+        mark.className = 'search-highlight';
+        mark.textContent = part;
+        fragment.appendChild(mark);
+        matchCount++;
+      } else {
+        fragment.appendChild(document.createTextNode(part));
+      }
+    }
+
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+
+  return matchCount;
+}
+
+/**
+ * Remove all <mark class="search-highlight"> elements, restoring the original
+ * text nodes. Also normalizes adjacent text nodes afterward.
+ */
+function clearHighlights(container: HTMLElement): void {
+  const marks = container.querySelectorAll('mark.search-highlight');
+  marks.forEach((mark) => {
+    const parent = mark.parentNode;
+    if (!parent) return;
+    const textNode = document.createTextNode(mark.textContent || '');
+    parent.replaceChild(textNode, mark);
+    parent.normalize();
+  });
+}
+
+export function ConversationDetail({ conversation, searchQuery }: ConversationDetailProps) {
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // Apply highlights and scroll to first match whenever query or conversation changes
+  const applyHighlights = useCallback(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+
+    // Always clear previous highlights first
+    clearHighlights(container);
+
+    const trimmedQuery = searchQuery?.trim() || '';
+    if (!trimmedQuery) return;
+
+    // Wait a tick for ReactMarkdown async rendering to complete
+    requestAnimationFrame(() => {
+      if (!messagesRef.current) return;
+      const matchCount = highlightTextNodes(messagesRef.current, trimmedQuery);
+
+      // Scroll to first match
+      if (matchCount > 0) {
+        const firstMark = messagesRef.current.querySelector('mark.search-highlight');
+        firstMark?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  }, [searchQuery]);
+
+  useEffect(() => {
+    applyHighlights();
+  }, [applyHighlights, conversation]);
+
   if (!conversation) {
     return (
       <div className="flex-1 flex items-center justify-center text-[rgb(var(--foreground-muted))]">
@@ -67,7 +167,7 @@ export function ConversationDetail({ conversation }: ConversationDetailProps) {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
+        <div ref={messagesRef} className="max-w-4xl mx-auto py-6 px-4 space-y-6">
         {conversation.messages.map((msg, idx) => (
           <div key={idx} className="flex gap-3">
             {/* Avatar */}

@@ -23,7 +23,7 @@ npx kiro-history
 
 ## ✨ Features
 
-- 🔍 **Search** — Find conversations instantly across all your history
+- 🔍 **Search** — Find conversations instantly across all your history, with highlighted matches and auto-scroll within the selected session
 - 📝 **Markdown Support** — Rendered markdown with syntax-highlighted code blocks and tables
 - 🔧 **Tool Details** — Collapsible tool usage information for each assistant response
 - 🔄 **Live Updates** — Automatically refreshes when new conversations are added
