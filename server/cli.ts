@@ -168,7 +168,7 @@ export async function main(): Promise<void> {
       const ideV2Reader = ideV2WorkspaceDirs.length > 0 ? createIdeV2Reader(ideV2WorkspaceDirs) : undefined;
       let ideV2Watcher: { close(): void } | undefined;
       if (ideV2Reader) {
-        console.log(`Also found new-format IDE sessions in ${ideV2WorkspaceDirs.length} workspace(s)`);
+        console.log(`Also found v1.0 IDE sessions in ${ideV2WorkspaceDirs.length} workspace(s)`);
         // Watch each workspace directory for new sessions
         const watchers: { close(): void }[] = [];
         for (const dir of ideV2WorkspaceDirs) {
