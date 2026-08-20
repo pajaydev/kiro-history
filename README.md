@@ -102,7 +102,7 @@ kiro-history --source ide ~/path/to/kiro.kiroagent
 
 ## 🔧 How It Works
 
-**Kiro CLI** saves conversations to a local SQLite database, while **Kiro IDE** stores them as JSON files in its global storage directory. This tool reads from either source and displays your chat history in a clean, browsable format.
+**Kiro CLI** saves conversations to a local SQLite database (and newer flat-file sessions). **Kiro IDE** stores them as JSON files — both the original pre-v1.0 format and the current v1.0 JSONL format. This tool reads from all sources and displays your chat history in a clean, browsable format.
 
 ### Default Paths
 
