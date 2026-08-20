@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { createDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
 import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
+import { createIdeV2Reader, resolveIdeV2WorkspaceDirs } from './ide-v2.js';
 import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
@@ -57,7 +58,9 @@ export function detectSource(): 'cli' | 'ide' {
   const idePath = resolveIdePath();
   const dbPath = resolveDbPath();
 
-  const hasIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+  const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+  const hasNewIde = resolveIdeV2WorkspaceDirs().length > 0;
+  const hasIde = hasOldIde || hasNewIde;
   const hasCli = existsSync(dbPath);
 
   if (hasIde && !hasCli) return 'ide';
@@ -159,6 +162,23 @@ export async function main(): Promise<void> {
         });
       }
 
+      // Create new-format IDE reader (sessions in ~/.kiro/sessions/<workspace-hash>/)
+      const ideV2WorkspaceDirs = resolveIdeV2WorkspaceDirs();
+      const ideV2Reader = ideV2WorkspaceDirs.length > 0 ? createIdeV2Reader(ideV2WorkspaceDirs) : undefined;
+      let ideV2Watcher: { close(): void } | undefined;
+      if (ideV2Reader) {
+        console.log(`Also found new-format IDE sessions in ${ideV2WorkspaceDirs.length} workspace(s)`);
+        // Watch each workspace directory for new sessions
+        const watchers: { close(): void }[] = [];
+        for (const dir of ideV2WorkspaceDirs) {
+          watchers.push(watchDirectory(dir, () => {
+            console.log('IDE V2 sessions changed, notifying clients...');
+            notifyClients();
+          }));
+        }
+        ideV2Watcher = { close: () => watchers.forEach(w => w.close()) };
+      }
+
       const { port, close: closeServer } = await startServer({ 
         reader, 
         port: requestedPort,
@@ -166,6 +186,7 @@ export async function main(): Promise<void> {
         alternateReader,
         alternateSourceType,
         cliV2Reader,
+        ideV2Reader,
       });
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
@@ -185,8 +206,10 @@ export async function main(): Promise<void> {
         console.log('\nShutting down gracefully...');
         watcherInstance.close();
         if (cliV2Watcher) cliV2Watcher.close();
+        if (ideV2Watcher) ideV2Watcher.close();
         reader.close();
         if (cliV2Reader) cliV2Reader.close();
+        if (ideV2Reader) ideV2Reader.close();
         closeServer();
         process.exit(0);
       };

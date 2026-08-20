@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import type { DatabaseReader } from './db.js';
 import type { IdeReader } from './ide.js';
 import type { CliV2Reader } from './cli-v2.js';
+import type { IdeV2Reader } from './ide-v2.js';
 import { parseConversationValue, parseConversationValueSimple } from './parser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,7 @@ export interface ServerOptions {
   alternateReader?: DatabaseReader | IdeReader;
   alternateSourceType?: 'cli' | 'ide';
   cliV2Reader?: CliV2Reader;
+  ideV2Reader?: IdeV2Reader;
 }
 
 // SSE clients waiting for refresh notifications
@@ -40,7 +42,7 @@ const MIME_TYPES: Record<string, string> = {
 
 export function createApp(options: ServerOptions): Hono {
   const app = new Hono();
-  const { reader, sourceType, alternateReader, alternateSourceType, cliV2Reader } = options;
+  const { reader, sourceType, alternateReader, alternateSourceType, cliV2Reader, ideV2Reader } = options;
 
   // Error handling middleware
   app.onError((err, c) => {
@@ -113,6 +115,19 @@ export function createApp(options: ServerOptions): Hono {
 
       // IdeReader path
       const conversations = activeReader.getConversations();
+
+      // Merge new-format IDE sessions if available
+      if (ideV2Reader) {
+        const v2Conversations = ideV2Reader.getConversations();
+        // New format wins on deduplication — build set of new-format IDs
+        const v2Ids = new Set(v2Conversations.map(c => c.conversationId));
+        // Keep old-format sessions that aren't duplicated in new format
+        const deduplicated = conversations.filter(c => !v2Ids.has(c.conversationId));
+        const merged = [...v2Conversations, ...deduplicated];
+        merged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        return c.json(merged);
+      }
+
       return c.json(conversations);
     } catch (error) {
       console.error('Failed to read conversations:', error);
