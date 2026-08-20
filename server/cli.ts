@@ -106,7 +106,7 @@ export async function main(): Promise<void> {
           process.exit(1);
         }
 
-        console.log(`Using Kiro IDE sessions: ${idePath}`);
+        console.log(`Using pre v1.0 IDE sessions: ${idePath}`);
         reader = createIdeReader(idePath);
 
         // Load CLI as alternate if available
@@ -137,7 +137,7 @@ export async function main(): Promise<void> {
 
         // Load IDE as alternate if available
         if (hasIde) {
-          console.log(`Also found IDE sessions: ${idePath}`);
+          console.log(`Also found pre v1.0 IDE sessions: ${idePath}`);
           alternateReader = createIdeReader(idePath);
           alternateSourceType = 'ide';
         }
