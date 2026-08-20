@@ -89,7 +89,7 @@ export async function main(): Promise<void> {
       let alternateReader: ServerOptions['alternateReader'];
       let alternateSourceType: ServerOptions['alternateSourceType'];
       let watchTarget: string;
-      let watcherInstance: { close(): void };
+      let watcherInstance: { close(): void } | undefined;
 
       // Try to load both sources if available
       const idePath = resolveIdePath(userPath);
@@ -108,7 +108,6 @@ export async function main(): Promise<void> {
 
         console.log(`Using Kiro IDE sessions: ${idePath}`);
         reader = createIdeReader(idePath);
-        watchTarget = wsSessionsDir;
 
         // Load CLI as alternate if available
         if (hasCli) {
@@ -117,11 +116,13 @@ export async function main(): Promise<void> {
           alternateSourceType = 'cli';
         }
 
-        // Watch the workspace-sessions directory for changes
-        watcherInstance = watchDirectory(watchTarget, () => {
-          console.log('Sessions changed, notifying clients...');
-          notifyClients();
-        });
+        // Watch the workspace-sessions directory for changes (only if it exists)
+        if (existsSync(wsSessionsDir)) {
+          watcherInstance = watchDirectory(wsSessionsDir, () => {
+            console.log('Sessions changed, notifying clients...');
+            notifyClients();
+          });
+        }
       } else {
 
         if (!existsSync(dbPath)) {
@@ -204,7 +205,7 @@ export async function main(): Promise<void> {
       // Setup graceful shutdown handlers
       const cleanup = () => {
         console.log('\nShutting down gracefully...');
-        watcherInstance.close();
+        watcherInstance?.close();
         if (cliV2Watcher) cliV2Watcher.close();
         if (ideV2Watcher) ideV2Watcher.close();
         reader.close();
