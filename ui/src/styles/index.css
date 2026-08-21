@@ -30,6 +30,16 @@
     scroll-margin-top: 4rem;
   }
 
+  /* Turn cost badge (per-turn credit/model display) */
+  .turn-cost-badge {
+    color: #00FF00;
+  }
+
+  /* Session-level cost summary bar */
+  .session-cost-summary {
+    color: #00FF00;
+  }
+
   /* Tailwind v4 Preflight sets buttons to `cursor: default`; restore the
      pointer for interactive elements, keeping disabled ones as not-allowed. */
   button:not(:disabled),
