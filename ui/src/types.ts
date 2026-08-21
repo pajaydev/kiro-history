@@ -34,9 +34,17 @@ export interface ToolUse {
   args: Record<string, unknown>;
 }
 
+// Turn metadata (credit cost, model, request count)
+export interface TurnMetadata {
+  creditCost: number;       // sum of metering_usage[].value
+  model: string;            // model ID ("auto", "claude-sonnet-4.6", etc.)
+  requestCount: number;     // total_request_count
+}
+
 // Individual message in a conversation
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   toolUses?: ToolUse[];
+  turnMetadata?: TurnMetadata;
 }
