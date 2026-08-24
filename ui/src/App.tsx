@@ -18,6 +18,19 @@ export function App() {
   const [copied, setCopied] = useState(false);
   const { conversations, loading } = useConversations(currentSource || undefined);
 
+  // Keep the detail pane in sync when live updates refresh the conversations list.
+  // Without this, the selected conversation shows stale data until the user clicks away and back.
+  useEffect(() => {
+    if (selectedConversation && conversations.length > 0) {
+      const updated = conversations.find(
+        (c) => c.conversationId === selectedConversation.conversationId
+      );
+      if (updated && updated !== selectedConversation) {
+        setSelectedConversation(updated);
+      }
+    }
+  }, [conversations]);
+
   // The CLI can resume a session by id (`kiro-cli chat --resume-id <id>`).
   // IDE sessions have no CLI resume path, so we fall back to copying the directory.
   const canResume = currentSource === 'cli' && !!selectedConversation?.conversationId;
