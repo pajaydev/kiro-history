@@ -94,7 +94,9 @@ export async function main(): Promise<void> {
       // Try to load both sources if available
       const idePath = resolveIdePath(userPath);
       const dbPath = resolveDbPath(userPath);
-      const hasIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+      const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+      const hasNewIde = resolveIdeV2WorkspaceDirs().length > 0;
+      const hasIde = hasOldIde || hasNewIde;
       const hasCli = existsSync(dbPath);
 
       if (source === 'ide') {
