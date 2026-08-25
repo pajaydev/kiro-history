@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { createDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
 import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
+import { createIdeV1Reader, resolveIdeV1WorkspaceDirs } from './ide-v1.js';
 import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
@@ -57,7 +58,9 @@ export function detectSource(): 'cli' | 'ide' {
   const idePath = resolveIdePath();
   const dbPath = resolveDbPath();
 
-  const hasIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+  const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+  const hasNewIde = resolveIdeV1WorkspaceDirs().length > 0;
+  const hasIde = hasOldIde || hasNewIde;
   const hasCli = existsSync(dbPath);
 
   if (hasIde && !hasCli) return 'ide';
@@ -86,12 +89,14 @@ export async function main(): Promise<void> {
       let alternateReader: ServerOptions['alternateReader'];
       let alternateSourceType: ServerOptions['alternateSourceType'];
       let watchTarget: string;
-      let watcherInstance: { close(): void };
+      let watcherInstance: { close(): void } | undefined;
 
       // Try to load both sources if available
       const idePath = resolveIdePath(userPath);
       const dbPath = resolveDbPath(userPath);
-      const hasIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+      const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
+      const hasNewIde = resolveIdeV1WorkspaceDirs().length > 0;
+      const hasIde = hasOldIde || hasNewIde;
       const hasCli = existsSync(dbPath);
 
       if (source === 'ide') {
@@ -103,9 +108,8 @@ export async function main(): Promise<void> {
           process.exit(1);
         }
 
-        console.log(`Using Kiro IDE sessions: ${idePath}`);
+        console.log(`Using pre v1.0 IDE sessions: ${idePath}`);
         reader = createIdeReader(idePath);
-        watchTarget = wsSessionsDir;
 
         // Load CLI as alternate if available
         if (hasCli) {
@@ -114,11 +118,13 @@ export async function main(): Promise<void> {
           alternateSourceType = 'cli';
         }
 
-        // Watch the workspace-sessions directory for changes
-        watcherInstance = watchDirectory(watchTarget, () => {
-          console.log('Sessions changed, notifying clients...');
-          notifyClients();
-        });
+        // Watch the workspace-sessions directory for changes (only if it exists)
+        if (existsSync(wsSessionsDir)) {
+          watcherInstance = watchDirectory(wsSessionsDir, () => {
+            console.log('Sessions changed, notifying clients...');
+            notifyClients();
+          });
+        }
       } else {
 
         if (!existsSync(dbPath)) {
@@ -133,7 +139,7 @@ export async function main(): Promise<void> {
 
         // Load IDE as alternate if available
         if (hasIde) {
-          console.log(`Also found IDE sessions: ${idePath}`);
+          console.log(`Also found pre v1.0 IDE sessions: ${idePath}`);
           alternateReader = createIdeReader(idePath);
           alternateSourceType = 'ide';
         }
@@ -159,6 +165,23 @@ export async function main(): Promise<void> {
         });
       }
 
+      // Create new-format IDE reader (sessions in ~/.kiro/sessions/<workspace-hash>/)
+      const ideV1WorkspaceDirs = resolveIdeV1WorkspaceDirs();
+      const ideV1Reader = ideV1WorkspaceDirs.length > 0 ? createIdeV1Reader(ideV1WorkspaceDirs) : undefined;
+      let ideV1Watcher: { close(): void } | undefined;
+      if (ideV1Reader) {
+        console.log(`Also found v1.0 IDE sessions in ${ideV1WorkspaceDirs.length} workspace(s)`);
+        // Watch each workspace directory for new sessions
+        const watchers: { close(): void }[] = [];
+        for (const dir of ideV1WorkspaceDirs) {
+          watchers.push(watchDirectory(dir, () => {
+            console.log('IDE v1.0 sessions changed, notifying clients...');
+            notifyClients();
+          }));
+        }
+        ideV1Watcher = { close: () => watchers.forEach(w => w.close()) };
+      }
+
       const { port, close: closeServer } = await startServer({ 
         reader, 
         port: requestedPort,
@@ -166,6 +189,7 @@ export async function main(): Promise<void> {
         alternateReader,
         alternateSourceType,
         cliV2Reader,
+        ideV1Reader,
       });
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
@@ -183,10 +207,12 @@ export async function main(): Promise<void> {
       // Setup graceful shutdown handlers
       const cleanup = () => {
         console.log('\nShutting down gracefully...');
-        watcherInstance.close();
+        watcherInstance?.close();
         if (cliV2Watcher) cliV2Watcher.close();
+        if (ideV1Watcher) ideV1Watcher.close();
         reader.close();
         if (cliV2Reader) cliV2Reader.close();
+        if (ideV1Reader) ideV1Reader.close();
         closeServer();
         process.exit(0);
       };
