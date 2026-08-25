@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createIdeV2Reader, resolveIdeV2WorkspaceDirs } from './ide-v2.js';
+import { createIdeV1Reader, resolveIdeV1WorkspaceDirs } from './ide-v1.js';
 
 let tempDir: string;
 
 beforeEach(() => {
-  tempDir = mkdtempSync(join(tmpdir(), 'ide-v2-test-'));
+  tempDir = mkdtempSync(join(tmpdir(), 'ide-v1-test-'));
 });
 
 afterEach(() => {
@@ -99,9 +99,9 @@ function baseMeta(overrides: Record<string, unknown> = {}): Record<string, unkno
 
 // ── Tests ───────────────────────────────────────────────────────────
 
-describe('createIdeV2Reader', () => {
+describe('createIdeV1Reader', () => {
   it('returns empty for non-existent workspace dirs', () => {
-    const reader = createIdeV2Reader(['/tmp/does-not-exist-xyz']);
+    const reader = createIdeV1Reader(['/tmp/does-not-exist-xyz']);
     expect(reader.getConversations()).toEqual([]);
   });
 
@@ -109,7 +109,7 @@ describe('createIdeV2Reader', () => {
     const wsDir = join(tempDir, 'ws-hash-1');
     mkdirSync(wsDir, { recursive: true });
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     expect(reader.getConversations()).toEqual([]);
   });
 
@@ -122,7 +122,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
 
     expect(convs).toHaveLength(1);
@@ -143,7 +143,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
     const msg = convs[0].messages[1];
 
@@ -168,7 +168,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
     const msg = convs[0].messages[1];
 
@@ -189,7 +189,7 @@ describe('createIdeV2Reader', () => {
       usageSummaryEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
 
     expect(convs[0].messages).toHaveLength(2);
@@ -203,7 +203,7 @@ describe('createIdeV2Reader', () => {
     writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(baseMeta()));
     // No messages.jsonl
 
-    const reader = createIdeV2Reader([join(tempDir, 'ws-hash-1')]);
+    const reader = createIdeV1Reader([join(tempDir, 'ws-hash-1')]);
     expect(reader.getConversations()).toEqual([]);
   });
 
@@ -213,7 +213,7 @@ describe('createIdeV2Reader', () => {
     writeFileSync(join(sessionDir, 'messages.jsonl'), userEntry('hi'));
     // No session.json
 
-    const reader = createIdeV2Reader([join(tempDir, 'ws-hash-1')]);
+    const reader = createIdeV1Reader([join(tempDir, 'ws-hash-1')]);
     expect(reader.getConversations()).toEqual([]);
   });
 
@@ -221,7 +221,7 @@ describe('createIdeV2Reader', () => {
     const wsDir = join(tempDir, 'ws-hash-1');
     writeIdeSession(wsDir, 'session-1', baseMeta(), []);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     expect(reader.getConversations()).toEqual([]);
   });
 
@@ -231,7 +231,7 @@ describe('createIdeV2Reader', () => {
     writeFileSync(join(sessionDir, 'session.json'), '{not valid json!!');
     writeFileSync(join(sessionDir, 'messages.jsonl'), userEntry('hello'));
 
-    const reader = createIdeV2Reader([join(tempDir, 'ws-hash-1')]);
+    const reader = createIdeV1Reader([join(tempDir, 'ws-hash-1')]);
     expect(reader.getConversations()).toEqual([]);
   });
 
@@ -245,7 +245,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
 
     expect(convs).toHaveLength(1);
@@ -274,7 +274,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
 
     expect(convs).toHaveLength(2);
@@ -310,7 +310,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
 
     const wsConv = convs.find(c => c.conversationId === 'session-ws');
@@ -329,7 +329,7 @@ describe('createIdeV2Reader', () => {
       // No turn_end — simulates incomplete session
     ]);
 
-    const reader = createIdeV2Reader([wsDir]);
+    const reader = createIdeV1Reader([wsDir]);
     const convs = reader.getConversations();
 
     expect(convs).toHaveLength(1);
@@ -361,7 +361,7 @@ describe('createIdeV2Reader', () => {
       turnEndEntry(),
     ]);
 
-    const reader = createIdeV2Reader([wsDir1, wsDir2]);
+    const reader = createIdeV1Reader([wsDir1, wsDir2]);
     const convs = reader.getConversations();
 
     expect(convs).toHaveLength(2);
@@ -371,14 +371,14 @@ describe('createIdeV2Reader', () => {
   });
 });
 
-describe('resolveIdeV2WorkspaceDirs', () => {
+describe('resolveIdeV1WorkspaceDirs', () => {
   it('returns empty for non-existent base path', () => {
-    const dirs = resolveIdeV2WorkspaceDirs('/tmp/does-not-exist-xyz');
+    const dirs = resolveIdeV1WorkspaceDirs('/tmp/does-not-exist-xyz');
     expect(dirs).toEqual([]);
   });
 
   it('returns empty for empty base path', () => {
-    const dirs = resolveIdeV2WorkspaceDirs(tempDir);
+    const dirs = resolveIdeV1WorkspaceDirs(tempDir);
     expect(dirs).toEqual([]);
   });
 
@@ -386,7 +386,7 @@ describe('resolveIdeV2WorkspaceDirs', () => {
     mkdirSync(join(tempDir, 'cli'));
     mkdirSync(join(tempDir, 'abc123hash'));
 
-    const dirs = resolveIdeV2WorkspaceDirs(tempDir);
+    const dirs = resolveIdeV1WorkspaceDirs(tempDir);
 
     expect(dirs).toHaveLength(1);
     expect(dirs[0]).toBe(join(tempDir, 'abc123hash'));
@@ -396,7 +396,7 @@ describe('resolveIdeV2WorkspaceDirs', () => {
     mkdirSync(join(tempDir, 'workspace-hash-1'));
     writeFileSync(join(tempDir, 'some-file.json'), '{}');
 
-    const dirs = resolveIdeV2WorkspaceDirs(tempDir);
+    const dirs = resolveIdeV1WorkspaceDirs(tempDir);
 
     expect(dirs).toHaveLength(1);
     expect(dirs[0]).toBe(join(tempDir, 'workspace-hash-1'));

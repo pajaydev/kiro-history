@@ -5,7 +5,7 @@ import type { ParsedConversation, ConversationMessage, ToolUse } from './types.j
 
 // ── session.json schema ─────────────────────────────────────────────
 
-interface IdeV2SessionMeta {
+interface IdeV1SessionMeta {
   id: string;
   title?: string;
   agentMode?: string;
@@ -37,7 +37,7 @@ type JsonlPayload =
 
 // ── Reader interface ────────────────────────────────────────────────
 
-export interface IdeV2Reader {
+export interface IdeV1Reader {
   getConversations(): ParsedConversation[];
   close(): void;
 }
@@ -48,7 +48,7 @@ export interface IdeV2Reader {
  * Returns the base path for new-format IDE sessions: ~/.kiro/sessions/
  * The actual workspace-hash directories are children of this path.
  */
-export function resolveIdeV2BasePath(): string {
+export function resolveIdeV1BasePath(): string {
   return join(homedir(), '.kiro', 'sessions');
 }
 
@@ -56,8 +56,8 @@ export function resolveIdeV2BasePath(): string {
  * Scans ~/.kiro/sessions/ and returns workspace-hash directory paths,
  * excluding the `cli` directory (that's for CLI V2 sessions).
  */
-export function resolveIdeV2WorkspaceDirs(basePath?: string): string[] {
-  const sessionsDir = basePath || resolveIdeV2BasePath();
+export function resolveIdeV1WorkspaceDirs(basePath?: string): string[] {
+  const sessionsDir = basePath || resolveIdeV1BasePath();
   if (!existsSync(sessionsDir)) return [];
 
   const dirs: string[] = [];
@@ -76,7 +76,7 @@ export function resolveIdeV2WorkspaceDirs(basePath?: string): string[] {
 
 // ── JSONL parser ────────────────────────────────────────────────────
 
-function parseIdeV2Messages(jsonlPath: string): ConversationMessage[] {
+function parseIdeV1Messages(jsonlPath: string): ConversationMessage[] {
   let lines: string[];
   try {
     lines = readFileSync(jsonlPath, 'utf-8').split('\n').filter(l => l.trim());
@@ -168,7 +168,7 @@ function parseIdeV2Messages(jsonlPath: string): ConversationMessage[] {
 
 // ── Reader factory ──────────────────────────────────────────────────
 
-export function createIdeV2Reader(workspaceDirs: string[]): IdeV2Reader {
+export function createIdeV1Reader(workspaceDirs: string[]): IdeV1Reader {
   return {
     getConversations(): ParsedConversation[] {
       const conversations: ParsedConversation[] = [];
@@ -192,14 +192,14 @@ export function createIdeV2Reader(workspaceDirs: string[]): IdeV2Reader {
 
           if (!existsSync(metaPath) || !existsSync(jsonlPath)) continue;
 
-          let meta: IdeV2SessionMeta;
+          let meta: IdeV1SessionMeta;
           try {
             meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
           } catch {
             continue;
           }
 
-          const messages = parseIdeV2Messages(jsonlPath);
+          const messages = parseIdeV1Messages(jsonlPath);
           if (messages.length === 0) continue;
 
           const updatedAt = meta.lastModifiedAt
