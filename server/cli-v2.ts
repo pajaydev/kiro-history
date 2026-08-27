@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { ParsedConversation, ConversationMessage, ToolUse } from './types.js';
+import type { ParsedConversation, ConversationMessage, ToolUse, TurnMetadata } from './types.js';
 
 interface V2SessionMeta {
   session_id: string;
@@ -20,6 +20,44 @@ interface V2ToolUseData {
   toolUseId: string;
   name: string;
   input: Record<string, unknown>;
+}
+
+interface V2MeteringEntry {
+  value: number;
+  unit: string;
+  unitPlural: string;
+}
+
+interface V2UserTurnMeta {
+  total_request_count?: number;
+  model?: string;
+  metering_usage?: V2MeteringEntry[];
+}
+
+interface V2SessionState {
+  conversation_metadata?: {
+    user_turn_metadatas?: V2UserTurnMeta[];
+  };
+}
+
+interface V2SessionFile extends V2SessionMeta {
+  session_state?: V2SessionState;
+}
+
+function extractTurnMetadatas(meta: V2SessionFile): TurnMetadata[] {
+  const turns = meta.session_state?.conversation_metadata?.user_turn_metadatas;
+  if (!turns || !Array.isArray(turns)) return [];
+
+  return turns.map((t) => {
+    const creditCost = Array.isArray(t.metering_usage)
+      ? t.metering_usage.reduce((sum, m) => sum + (m.value || 0), 0)
+      : 0;
+    return {
+      creditCost,
+      model: t.model || 'unknown',
+      requestCount: t.total_request_count || 0,
+    };
+  });
 }
 
 export interface CliV2Reader {
@@ -116,7 +154,7 @@ export function createCliV2Reader(sessionsDir: string): CliV2Reader {
 
       for (const file of files) {
         const metaPath = join(sessionsDir, file);
-        let meta: V2SessionMeta;
+        let meta: V2SessionFile;
         try {
           meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
         } catch {
@@ -126,6 +164,21 @@ export function createCliV2Reader(sessionsDir: string): CliV2Reader {
         const jsonlPath = metaPath.replace(/\.json$/, '.jsonl');
         const messages = parseJsonlMessages(jsonlPath);
         if (messages.length === 0) continue;
+
+        // Extract per-turn metadata and attach to assistant messages
+        const turnMetadatas = extractTurnMetadatas(meta);
+        if (turnMetadatas.length > 0) {
+          let turnIndex = 0;
+          for (const msg of messages) {
+            if (msg.role === 'user') {
+              // This user message corresponds to turnMetadatas[turnIndex].
+              // We'll attach the metadata to the next assistant message.
+              turnIndex++;
+            } else if (msg.role === 'assistant' && turnIndex > 0 && turnIndex - 1 < turnMetadatas.length) {
+              msg.turnMetadata = turnMetadatas[turnIndex - 1];
+            }
+          }
+        }
 
         const updatedAt = meta.updated_at ? new Date(meta.updated_at).getTime() : undefined;
 

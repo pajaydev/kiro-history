@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { ParsedConversation, ToolUse } from '../types';
+import type { ParsedConversation, ToolUse, TurnMetadata } from '../types';
 
 interface ConversationDetailProps {
   conversation: ParsedConversation | null;
@@ -42,6 +42,51 @@ function ToolUseBadges({ toolUses }: { toolUses: ToolUse[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function TurnCostBadge({ turnMetadata }: { turnMetadata: TurnMetadata }) {
+  const cost = turnMetadata.creditCost.toFixed(4);
+  return (
+    <div className="turn-cost-badge mt-3 border-t border-[rgb(var(--border))] pt-3">
+      <div className="flex items-center gap-1.5 text-xs">
+        <span>⚡</span>
+        <span>{cost} credits</span>
+        <span className="opacity-50">·</span>
+        <span>{turnMetadata.model}</span>
+        <span className="opacity-50">·</span>
+        <span>{turnMetadata.requestCount} request{turnMetadata.requestCount !== 1 ? 's' : ''}</span>
+      </div>
+    </div>
+  );
+}
+
+function SessionCostSummary({ messages }: { messages: ParsedConversation['messages'] }) {
+  let totalCredits = 0;
+  let totalRequests = 0;
+  let turnCount = 0;
+
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.turnMetadata) {
+      totalCredits += msg.turnMetadata.creditCost;
+      totalRequests += msg.turnMetadata.requestCount;
+      turnCount++;
+    }
+  }
+
+  if (turnCount === 0) return null;
+
+  return (
+    <div className="session-cost-summary border-b border-[rgb(var(--border))] px-4 py-2">
+      <div className="max-w-4xl mx-auto flex items-center gap-2 text-xs">
+        <span>⚡</span>
+        <span>Session total: {totalCredits.toFixed(4)} credits</span>
+        <span className="opacity-50">·</span>
+        <span>{totalRequests} requests</span>
+        <span className="opacity-50">·</span>
+        <span>{turnCount} turns</span>
+      </div>
     </div>
   );
 }
@@ -164,6 +209,9 @@ export function ConversationDetail({ conversation, searchQuery }: ConversationDe
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+
+      {/* Session cost summary */}
+      <SessionCostSummary messages={conversation.messages} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
@@ -298,6 +346,9 @@ export function ConversationDetail({ conversation, searchQuery }: ConversationDe
                     >
                       {msg.content}
                     </ReactMarkdown>
+                    {msg.turnMetadata && (
+                      <TurnCostBadge turnMetadata={msg.turnMetadata} />
+                    )}
                     {msg.toolUses && msg.toolUses.length > 0 && (
                       <ToolUseBadges toolUses={msg.toolUses} />
                     )}
