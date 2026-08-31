@@ -30,11 +30,12 @@ jobs:
       # is unset. The repo's own .npmrc already pins the registry.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
-      # Trusted publishing needs npm >= 11.5.1; Node 20 ships npm 10.
+      # Trusted publishing needs npm >= 11.5.1. Pin the major rather than
+      # using npm@latest, which has moved to 12.x and requires newer Node.
       - name: Upgrade npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       # Compare package.json against what is actually live on npm, so a
       # re-run after a failed publish still ships and a no-op push skips.
