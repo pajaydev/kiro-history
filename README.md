@@ -25,6 +25,7 @@ npx kiro-history
 
 - 🔍 **Search** — Find conversations instantly across all your history, with highlighted matches and auto-scroll within the selected session
 - 📝 **Markdown Support** — Rendered markdown with syntax-highlighted code blocks and tables
+- 💰 **Credit Cost & Model** — Per-turn credit cost and model name displayed on each assistant response, with a session-level summary bar
 - 🔧 **Tool Details** — Collapsible tool usage information for each assistant response, including sub-agent tool calls
 - 🔄 **Live Updates** — Automatically refreshes when new conversations are added
 - 🚀 **Resume Sessions** — Copy a ready-to-run `kiro-cli chat --resume-id` command for any CLI conversation

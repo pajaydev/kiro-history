@@ -263,3 +263,233 @@ describe('createCliV2Reader', () => {
     expect(convs[0].conversationId).toBe('fallback-id');
   });
 });
+
+describe('createCliV2Reader — turn metadata extraction', () => {
+  it('attaches turnMetadata to assistant messages when user_turn_metadatas exists', () => {
+    writeSession('sess-meta-1', {
+      session_id: 'sess-meta-1',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'Cost test',
+      session_state: {
+        conversation_metadata: {
+          user_turn_metadatas: [
+            {
+              total_request_count: 3,
+              model: 'claude-sonnet-4.6',
+              metering_usage: [
+                { value: 0.10, unit: 'credit', unitPlural: 'credits' },
+                { value: 0.15, unit: 'credit', unitPlural: 'credits' },
+                { value: 0.05, unit: 'credit', unitPlural: 'credits' },
+              ],
+            },
+          ],
+        },
+      },
+    }, [
+      promptEntry('Hello'),
+      assistantEntry('Hi there!'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeDefined();
+    expect(assistantMsg.turnMetadata!.creditCost).toBeCloseTo(0.30);
+    expect(assistantMsg.turnMetadata!.model).toBe('claude-sonnet-4.6');
+    expect(assistantMsg.turnMetadata!.requestCount).toBe(3);
+  });
+
+  it('does not attach turnMetadata when user_turn_metadatas is absent', () => {
+    writeSession('sess-meta-2', {
+      session_id: 'sess-meta-2',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'No metadata',
+    }, [
+      promptEntry('Hello'),
+      assistantEntry('Hi!'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeUndefined();
+  });
+
+  it('does not attach turnMetadata when user_turn_metadatas is empty', () => {
+    writeSession('sess-meta-3', {
+      session_id: 'sess-meta-3',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'Empty metadata',
+      session_state: {
+        conversation_metadata: {
+          user_turn_metadatas: [],
+        },
+      },
+    }, [
+      promptEntry('Hello'),
+      assistantEntry('Hi!'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeUndefined();
+  });
+
+  it('handles empty metering_usage array (zero cost)', () => {
+    writeSession('sess-meta-4', {
+      session_id: 'sess-meta-4',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'Zero cost',
+      session_state: {
+        conversation_metadata: {
+          user_turn_metadatas: [
+            {
+              total_request_count: 1,
+              model: 'auto',
+              metering_usage: [],
+            },
+          ],
+        },
+      },
+    }, [
+      promptEntry('Hello'),
+      assistantEntry('Hi!'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeDefined();
+    expect(assistantMsg.turnMetadata!.creditCost).toBe(0);
+    expect(assistantMsg.turnMetadata!.model).toBe('auto');
+    expect(assistantMsg.turnMetadata!.requestCount).toBe(1);
+  });
+
+  it('correlates multiple turns to the correct assistant messages', () => {
+    writeSession('sess-meta-5', {
+      session_id: 'sess-meta-5',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'Multi-turn',
+      session_state: {
+        conversation_metadata: {
+          user_turn_metadatas: [
+            {
+              total_request_count: 2,
+              model: 'auto',
+              metering_usage: [
+                { value: 0.10, unit: 'credit', unitPlural: 'credits' },
+                { value: 0.08, unit: 'credit', unitPlural: 'credits' },
+              ],
+            },
+            {
+              total_request_count: 5,
+              model: 'claude-sonnet-4.6',
+              metering_usage: [
+                { value: 0.50, unit: 'credit', unitPlural: 'credits' },
+              ],
+            },
+          ],
+        },
+      },
+    }, [
+      promptEntry('First question'),
+      assistantEntry('First answer'),
+      promptEntry('Second question'),
+      assistantEntry('Second answer'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const msgs = convs[0].messages;
+
+    // First assistant message gets first turn's metadata
+    expect(msgs[1].turnMetadata).toBeDefined();
+    expect(msgs[1].turnMetadata!.creditCost).toBeCloseTo(0.18);
+    expect(msgs[1].turnMetadata!.model).toBe('auto');
+    expect(msgs[1].turnMetadata!.requestCount).toBe(2);
+
+    // Second assistant message gets second turn's metadata
+    expect(msgs[3].turnMetadata).toBeDefined();
+    expect(msgs[3].turnMetadata!.creditCost).toBeCloseTo(0.50);
+    expect(msgs[3].turnMetadata!.model).toBe('claude-sonnet-4.6');
+    expect(msgs[3].turnMetadata!.requestCount).toBe(5);
+  });
+
+  it('defaults model to "unknown" when model field is missing', () => {
+    writeSession('sess-meta-6', {
+      session_id: 'sess-meta-6',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'Missing model',
+      session_state: {
+        conversation_metadata: {
+          user_turn_metadatas: [
+            {
+              total_request_count: 1,
+              metering_usage: [
+                { value: 0.05, unit: 'credit', unitPlural: 'credits' },
+              ],
+            },
+          ],
+        },
+      },
+    }, [
+      promptEntry('Hello'),
+      assistantEntry('Hi!'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata!.model).toBe('unknown');
+  });
+
+  it('does not attach turnMetadata to user messages', () => {
+    writeSession('sess-meta-7', {
+      session_id: 'sess-meta-7',
+      cwd: '/home/user',
+      created_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:05:00Z',
+      title: 'User msg check',
+      session_state: {
+        conversation_metadata: {
+          user_turn_metadatas: [
+            {
+              total_request_count: 2,
+              model: 'auto',
+              metering_usage: [
+                { value: 0.12, unit: 'credit', unitPlural: 'credits' },
+              ],
+            },
+          ],
+        },
+      },
+    }, [
+      promptEntry('Hello'),
+      assistantEntry('Hi!'),
+    ]);
+
+    const reader = createCliV2Reader(tempDir);
+    const convs = reader.getConversations();
+    const userMsg = convs[0].messages[0];
+
+    expect(userMsg.turnMetadata).toBeUndefined();
+  });
+});

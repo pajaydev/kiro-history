@@ -78,11 +78,18 @@ function turnEndEntry(): string {
   });
 }
 
-function usageSummaryEntry(): string {
+function usageSummaryEntry(usage: number = 1.5, requestIds: string[] = ['req-1', 'req-2']): string {
   return JSON.stringify({
     id: `entry-${++entryCounter}`,
     timestamp: '2026-08-20T10:00:06Z',
-    payload: { type: 'usage_summary', inputTokens: 1000, outputTokens: 500 },
+    payload: {
+      type: 'usage_summary',
+      promptTurnSummaries: [{ unit: 'credit', unitPlural: 'credits', usage }],
+      elapsedTime: 5000,
+      status: 'success',
+      executionId: 'exec-1',
+      requestIds,
+    },
   });
 }
 
@@ -177,16 +184,16 @@ describe('createIdeV1Reader', () => {
     expect(msg.toolUses![1].name).toBe('write_file');
   });
 
-  it('skips tool_result and usage_summary payloads', () => {
+  it('skips tool_result payloads and extracts usage_summary as metadata', () => {
     const wsDir = join(tempDir, 'ws-hash-1');
-    writeIdeSession(wsDir, 'session-1', baseMeta(), [
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'claude-sonnet-4.6' }), [
       userEntry('Do something'),
       turnStartEntry(),
       assistantEntry('Done.'),
       toolCallEntry('tc-1', 'read_file', { path: '/x.txt' }),
       toolResultEntry('tc-1'),
+      usageSummaryEntry(0.25, ['req-1', 'req-2', 'req-3']),
       turnEndEntry(),
-      usageSummaryEntry(),
     ]);
 
     const reader = createIdeV1Reader([wsDir]);
@@ -195,6 +202,10 @@ describe('createIdeV1Reader', () => {
     expect(convs[0].messages).toHaveLength(2);
     expect(convs[0].messages[0].role).toBe('user');
     expect(convs[0].messages[1].role).toBe('assistant');
+    expect(convs[0].messages[1].turnMetadata).toBeDefined();
+    expect(convs[0].messages[1].turnMetadata!.creditCost).toBeCloseTo(0.25);
+    expect(convs[0].messages[1].turnMetadata!.model).toBe('claude-sonnet-4.6');
+    expect(convs[0].messages[1].turnMetadata!.requestCount).toBe(3);
   });
 
   it('skips sessions missing messages.jsonl', () => {
@@ -368,6 +379,171 @@ describe('createIdeV1Reader', () => {
     // Most recent first
     expect(convs[0].conversationId).toBe('session-b');
     expect(convs[1].conversationId).toBe('session-a');
+  });
+
+  // ── Cost extraction (usage_summary → TurnMetadata) ──────────────
+
+  it('attaches turnMetadata from usage_summary to assistant message', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'auto' }), [
+      userEntry('Hello'),
+      turnStartEntry(),
+      assistantEntry('Hi there!'),
+      usageSummaryEntry(1.0119, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8']),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeDefined();
+    expect(assistantMsg.turnMetadata!.creditCost).toBeCloseTo(1.0119);
+    expect(assistantMsg.turnMetadata!.model).toBe('auto');
+    expect(assistantMsg.turnMetadata!.requestCount).toBe(8);
+  });
+
+  it('does not attach turnMetadata when usage_summary is absent', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'auto' }), [
+      userEntry('Hello'),
+      turnStartEntry(),
+      assistantEntry('Hi there!'),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeUndefined();
+  });
+
+  it('uses "unknown" as model when modelId is not in session.json', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    // baseMeta() does not include modelId by default
+    writeIdeSession(wsDir, 'session-1', baseMeta(), [
+      userEntry('Hello'),
+      turnStartEntry(),
+      assistantEntry('Hi!'),
+      usageSummaryEntry(0.5, ['r1']),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata!.model).toBe('unknown');
+  });
+
+  it('handles multi-turn sessions with per-turn cost', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'claude-sonnet-4.6' }), [
+      userEntry('First question'),
+      turnStartEntry(),
+      assistantEntry('First answer'),
+      usageSummaryEntry(0.10, ['r1', 'r2']),
+      turnEndEntry(),
+      userEntry('Second question'),
+      turnStartEntry(),
+      assistantEntry('Second answer'),
+      usageSummaryEntry(2.25, ['r3', 'r4', 'r5']),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+
+    expect(convs[0].messages).toHaveLength(4);
+
+    const turn1 = convs[0].messages[1];
+    expect(turn1.turnMetadata!.creditCost).toBeCloseTo(0.10);
+    expect(turn1.turnMetadata!.requestCount).toBe(2);
+    expect(turn1.turnMetadata!.model).toBe('claude-sonnet-4.6');
+
+    const turn2 = convs[0].messages[3];
+    expect(turn2.turnMetadata!.creditCost).toBeCloseTo(2.25);
+    expect(turn2.turnMetadata!.requestCount).toBe(3);
+    expect(turn2.turnMetadata!.model).toBe('claude-sonnet-4.6');
+  });
+
+  it('user messages never receive turnMetadata', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'auto' }), [
+      userEntry('Hello'),
+      turnStartEntry(),
+      assistantEntry('Hi!'),
+      usageSummaryEntry(0.5, ['r1']),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+    const userMsg = convs[0].messages[0];
+
+    expect(userMsg.role).toBe('user');
+    expect(userMsg.turnMetadata).toBeUndefined();
+  });
+
+  it('handles usage_summary with empty promptTurnSummaries', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'auto' }), [
+      userEntry('Hello'),
+      turnStartEntry(),
+      assistantEntry('Hi!'),
+      // usage_summary with empty promptTurnSummaries
+      JSON.stringify({
+        id: `entry-${++entryCounter}`,
+        timestamp: '2026-08-20T10:00:06Z',
+        payload: {
+          type: 'usage_summary',
+          promptTurnSummaries: [],
+          requestIds: [],
+          executionId: 'exec-1',
+        },
+      }),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata).toBeDefined();
+    expect(assistantMsg.turnMetadata!.creditCost).toBe(0);
+    expect(assistantMsg.turnMetadata!.requestCount).toBe(0);
+  });
+
+  it('handles usage_summary with multiple promptTurnSummaries (sums them)', () => {
+    const wsDir = join(tempDir, 'ws-hash-1');
+    writeIdeSession(wsDir, 'session-1', baseMeta({ modelId: 'auto' }), [
+      userEntry('Hello'),
+      turnStartEntry(),
+      assistantEntry('Hi!'),
+      // usage_summary with multiple summaries (sub-agents could produce this)
+      JSON.stringify({
+        id: `entry-${++entryCounter}`,
+        timestamp: '2026-08-20T10:00:06Z',
+        payload: {
+          type: 'usage_summary',
+          promptTurnSummaries: [
+            { unit: 'credit', usage: 0.5 },
+            { unit: 'credit', usage: 0.3 },
+          ],
+          requestIds: ['r1', 'r2', 'r3', 'r4'],
+          executionId: 'exec-1',
+        },
+      }),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader([wsDir]);
+    const convs = reader.getConversations();
+    const assistantMsg = convs[0].messages[1];
+
+    expect(assistantMsg.turnMetadata!.creditCost).toBeCloseTo(0.8);
+    expect(assistantMsg.turnMetadata!.requestCount).toBe(4);
   });
 });
 

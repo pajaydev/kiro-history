@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { ParsedConversation, ConversationMessage, ToolUse } from './types.js';
+import type { ParsedConversation, ConversationMessage, ToolUse, TurnMetadata } from './types.js';
 
 // ── session.json schema ─────────────────────────────────────────────
 
@@ -114,7 +114,7 @@ function parseSubExecutionToolCalls(subExecPath: string): ToolUse[] {
   return toolUses;
 }
 
-function parseIdeV1Messages(jsonlPath: string, sessionDir: string): ConversationMessage[] {
+function parseIdeV1Messages(jsonlPath: string, sessionDir: string, modelId?: string): ConversationMessage[] {
   let lines: string[];
   try {
     lines = readFileSync(jsonlPath, 'utf-8').split('\n').filter(l => l.trim());
@@ -126,6 +126,7 @@ function parseIdeV1Messages(jsonlPath: string, sessionDir: string): Conversation
   // Accumulate tool calls per turn so we can attach them to the assistant message
   let pendingToolUses: ToolUse[] = [];
   let pendingAssistantContent = '';
+  let pendingTurnMetadata: TurnMetadata | undefined;
   let inTurn = false;
 
   for (const line of lines) {
@@ -154,6 +155,7 @@ function parseIdeV1Messages(jsonlPath: string, sessionDir: string): Conversation
         inTurn = true;
         pendingToolUses = [];
         pendingAssistantContent = '';
+        pendingTurnMetadata = undefined;
         break;
       }
 
@@ -176,6 +178,25 @@ function parseIdeV1Messages(jsonlPath: string, sessionDir: string): Conversation
         break;
       }
 
+      case 'usage_summary': {
+        const p = payload as {
+          type: 'usage_summary';
+          promptTurnSummaries?: { usage?: number; unit?: string }[];
+          requestIds?: string[];
+        };
+        const summaries = p.promptTurnSummaries;
+        const creditCost = Array.isArray(summaries)
+          ? summaries.reduce((sum, s) => sum + (s.usage || 0), 0)
+          : 0;
+        const requestCount = Array.isArray(p.requestIds) ? p.requestIds.length : 0;
+        pendingTurnMetadata = {
+          creditCost,
+          model: modelId || 'unknown',
+          requestCount,
+        };
+        break;
+      }
+
       case 'turn_end': {
         flushAssistant();
         inTurn = false;
@@ -192,7 +213,7 @@ function parseIdeV1Messages(jsonlPath: string, sessionDir: string): Conversation
         break;
       }
 
-      // All other payload types (usage_summary, session_metadata, etc.) are skipped
+      // All other payload types (session_metadata, steering_inclusion, etc.) are skipped
     }
   }
 
@@ -203,13 +224,18 @@ function parseIdeV1Messages(jsonlPath: string, sessionDir: string): Conversation
 
   function flushAssistant(): void {
     if (pendingAssistantContent || pendingToolUses.length > 0) {
-      messages.push({
+      const msg: ConversationMessage = {
         role: 'assistant',
         content: pendingAssistantContent,
         ...(pendingToolUses.length > 0 ? { toolUses: [...pendingToolUses] } : {}),
-      });
+      };
+      if (pendingTurnMetadata) {
+        msg.turnMetadata = pendingTurnMetadata;
+      }
+      messages.push(msg);
       pendingAssistantContent = '';
       pendingToolUses = [];
+      pendingTurnMetadata = undefined;
     }
   }
 }
@@ -247,7 +273,7 @@ export function createIdeV1Reader(workspaceDirs: string[]): IdeV1Reader {
             continue;
           }
 
-          const messages = parseIdeV1Messages(jsonlPath, sessionDir);
+          const messages = parseIdeV1Messages(jsonlPath, sessionDir, meta.modelId);
           if (messages.length === 0) continue;
 
           const updatedAt = meta.lastModifiedAt

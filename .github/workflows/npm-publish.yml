@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # required for npm trusted publishing (OIDC)
 
 jobs:
   build-and-test:
@@ -22,47 +23,54 @@ jobs:
   release:
     needs: build-and-test
     runs-on: ubuntu-latest
-    # Only release when package.json version changes
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
+      # No registry-url here on purpose: it makes setup-node write an .npmrc
+      # referencing ${NODE_AUTH_TOKEN}, and npm hard-fails when that env var
+      # is unset. The repo's own .npmrc already pins the registry.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org/
+          node-version: 24
 
-      - name: Check version change
+      # Trusted publishing needs npm >= 11.5.1. Pin the major rather than
+      # using npm@latest, which has moved to 12.x and requires newer Node.
+      - name: Upgrade npm
+        run: npm install -g npm@11
+
+      # Compare package.json against what is actually live on npm, so a
+      # re-run after a failed publish still ships and a no-op push skips.
+      - name: Check if version is published
         id: version
         run: |
           CURRENT=$(node -p "require('./package.json').version")
-          git show HEAD~1:package.json > /tmp/prev-package.json 2>/dev/null || echo '{"version":"0.0.0"}' > /tmp/prev-package.json
-          PREVIOUS=$(node -p "require('/tmp/prev-package.json').version")
+          LIVE=$(npm view "kiro-history@$CURRENT" version 2>/dev/null || true)
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          if [ "$LIVE" = "$CURRENT" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "v$CURRENT is already on npm - skipping publish"
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "v$CURRENT is not on npm - publishing"
           fi
 
-      - name: Build
-        if: steps.version.outputs.changed == 'true'
+      # npm first: a credential failure must not leave a GitHub Release
+      # pointing at a version that was never published.
+      - name: Publish to npm
+        if: steps.version.outputs.published == 'false'
         run: |
           npm ci
-          npm run build
+          npm publish
 
       - name: Create GitHub Release
-        if: steps.version.outputs.changed == 'true'
         run: |
-          gh release create "v${{ steps.version.outputs.current }}" \
-            --title "v${{ steps.version.outputs.current }}" \
-            --generate-notes
+          TAG="v${{ steps.version.outputs.current }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists - skipping"
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --target "${{ github.sha }}" \
+              --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to npm
-        if: steps.version.outputs.changed == 'true'
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.npm_token }}
