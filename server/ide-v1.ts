@@ -76,7 +76,45 @@ export function resolveIdeV1WorkspaceDirs(basePath?: string): string[] {
 
 // ── JSONL parser ────────────────────────────────────────────────────
 
-function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMessage[] {
+/**
+ * Extracts tool_call entries from a sub-execution JSONL file.
+ * Returns ToolUse[] for all tool calls found (excluding internal tools like subagent_response).
+ */
+function parseSubExecutionToolCalls(subExecPath: string): ToolUse[] {
+  let lines: string[];
+  try {
+    lines = readFileSync(subExecPath, 'utf-8').split('\n').filter(l => l.trim());
+  } catch {
+    return [];
+  }
+
+  const toolUses: ToolUse[] = [];
+  for (const line of lines) {
+    let entry: JsonlEntry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const payload = entry.payload;
+    if (!payload || payload.type !== 'tool_call') continue;
+
+    const p = payload as { type: 'tool_call'; toolCallId: string; toolName: string; args: Record<string, unknown> };
+    // Skip internal orchestration tools
+    if (p.toolName === 'subagent_response' || p.toolName === 'report_progress') continue;
+
+    toolUses.push({
+      id: p.toolCallId || '',
+      name: p.toolName || '',
+      args: p.args || {},
+    });
+  }
+
+  return toolUses;
+}
+
+function parseIdeV1Messages(jsonlPath: string, sessionDir: string, modelId?: string): ConversationMessage[] {
   let lines: string[];
   try {
     lines = readFileSync(jsonlPath, 'utf-8').split('\n').filter(l => l.trim());
@@ -165,6 +203,16 @@ function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMe
         break;
       }
 
+      case 'sub_agent_start': {
+        const p = payload as { type: 'sub_agent_start'; subSessionId?: string };
+        if (p.subSessionId) {
+          const subExecPath = join(sessionDir, 'sub-executions', `${p.subSessionId}.jsonl`);
+          const subToolCalls = parseSubExecutionToolCalls(subExecPath);
+          pendingToolUses.push(...subToolCalls);
+        }
+        break;
+      }
+
       // All other payload types (session_metadata, steering_inclusion, etc.) are skipped
     }
   }
@@ -225,7 +273,7 @@ export function createIdeV1Reader(workspaceDirs: string[]): IdeV1Reader {
             continue;
           }
 
-          const messages = parseIdeV1Messages(jsonlPath, meta.modelId);
+          const messages = parseIdeV1Messages(jsonlPath, sessionDir, meta.modelId);
           if (messages.length === 0) continue;
 
           const updatedAt = meta.lastModifiedAt
