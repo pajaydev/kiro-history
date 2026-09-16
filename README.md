@@ -27,7 +27,7 @@ npx kiro-history
 - 📝 **Markdown Support** — Rendered markdown with syntax-highlighted code blocks and tables
 - 💰 **Credit Cost & Model** — Per-turn credit cost and model name displayed on each assistant response, with a session-level summary bar
 - 🔧 **Tool Details** — Collapsible tool usage information for each assistant response
-- 🔄 **Live Updates** — Automatically refreshes when new conversations are added
+- 🔄 **Live Updates** — Automatically refreshes when new conversations are added, including sessions in brand-new IDE workspaces opened after the server started
 - 🚀 **Resume Sessions** — Copy a ready-to-run `kiro-cli chat --resume-id` command for any CLI conversation
 - 🔀 **Source Switching** — Segmented toggle to flip between CLI and IDE conversations
 - 🖥️ **Fullscreen & Collapsible Sidebar** — Focus on a single conversation or reclaim screen space
