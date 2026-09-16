@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import { createDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
 import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
-import { createIdeV1Reader, resolveIdeV1WorkspaceDirs } from './ide-v1.js';
+import { createIdeV1Reader, resolveIdeV1WorkspaceDirs, resolveIdeV1BasePath } from './ide-v1.js';
 import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
@@ -166,16 +166,29 @@ export async function main(): Promise<void> {
       }
 
       // Create new-format IDE reader (sessions in ~/.kiro/sessions/<workspace-hash>/)
+      const ideV1BasePath = resolveIdeV1BasePath();
       const ideV1WorkspaceDirs = resolveIdeV1WorkspaceDirs();
-      const ideV1Reader = ideV1WorkspaceDirs.length > 0 ? createIdeV1Reader(ideV1WorkspaceDirs) : undefined;
+      // Pass the base path so the reader can refresh() its workspace list and
+      // pick up workspaces created after startup without a restart.
+      const ideV1Reader = ideV1WorkspaceDirs.length > 0 ? createIdeV1Reader(ideV1WorkspaceDirs, ideV1BasePath) : undefined;
       let ideV1Watcher: { close(): void } | undefined;
       if (ideV1Reader) {
         console.log(`Also found v1.0 IDE sessions in ${ideV1WorkspaceDirs.length} workspace(s)`);
-        // Watch each workspace directory for new sessions
+        // Watch each existing workspace directory for new sessions.
         const watchers: { close(): void }[] = [];
         for (const dir of ideV1WorkspaceDirs) {
           watchers.push(watchDirectory(dir, () => {
             console.log('IDE v1.0 sessions changed, notifying clients...');
+            notifyClients();
+          }));
+        }
+        // Also watch the base ~/.kiro/sessions/ directory so a brand-new
+        // workspace-hash directory (an IDE project opened for the first time
+        // after startup) is detected live. The reader's getConversations()
+        // calls refresh() to re-resolve the workspace list on the next read.
+        if (existsSync(ideV1BasePath)) {
+          watchers.push(watchDirectory(ideV1BasePath, () => {
+            console.log('IDE v1.0 workspaces changed, notifying clients...');
             notifyClients();
           }));
         }

@@ -39,6 +39,13 @@ type JsonlPayload =
 
 export interface IdeV1Reader {
   getConversations(): ParsedConversation[];
+  /**
+   * Re-resolve the set of workspace-hash directories under the base path.
+   * Lets the reader pick up IDE workspaces created after startup without a
+   * restart. No-op when the reader was created without a base path (i.e. with
+   * an explicit, fixed directory list).
+   */
+  refresh(): void;
   close(): void;
 }
 
@@ -194,12 +201,32 @@ function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMe
 
 // ── Reader factory ──────────────────────────────────────────────────
 
-export function createIdeV1Reader(workspaceDirs: string[]): IdeV1Reader {
+/**
+ * Creates a reader for new-format IDE sessions.
+ *
+ * @param workspaceDirs Initial list of `<workspace-hash>` directories to read.
+ * @param basePath Optional `~/.kiro/sessions/` base path. When provided,
+ *   `refresh()` re-scans it so workspace directories created after startup are
+ *   picked up without a restart. When omitted, `refresh()` is a no-op and the
+ *   reader operates on the fixed `workspaceDirs` list it was given.
+ */
+export function createIdeV1Reader(workspaceDirs: string[], basePath?: string): IdeV1Reader {
+  // Mutable so refresh() can replace it with a freshly-scanned list.
+  let currentWorkspaceDirs = workspaceDirs;
+
+  function refresh(): void {
+    if (!basePath) return; // fixed-list mode: nothing to re-resolve
+    currentWorkspaceDirs = resolveIdeV1WorkspaceDirs(basePath);
+  }
+
   return {
     getConversations(): ParsedConversation[] {
+      // Re-resolve first so newly-created workspace dirs are included.
+      refresh();
+
       const conversations: ParsedConversation[] = [];
 
-      for (const wsDir of workspaceDirs) {
+      for (const wsDir of currentWorkspaceDirs) {
         if (!existsSync(wsDir)) continue;
 
         let sessionDirs: string[];
@@ -252,6 +279,8 @@ export function createIdeV1Reader(workspaceDirs: string[]): IdeV1Reader {
       conversations.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
       return conversations;
     },
+
+    refresh,
 
     close(): void {
       // No resources to clean up
