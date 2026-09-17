@@ -186,11 +186,29 @@ export async function main(): Promise<void> {
         // workspace-hash directory (an IDE project opened for the first time
         // after startup) is detected live. The reader's getConversations()
         // calls refresh() to re-resolve the workspace list on the next read.
+        //
+        // This watch is NON-RECURSIVE and change-gated on purpose:
+        //   - Non-recursive so writes *inside* subdirectories don't fire it.
+        //     In particular the CLI V2 store lives at ~/.kiro/sessions/cli/,
+        //     which is a child of this base dir; a recursive watch here would
+        //     misfire on every CLI turn (see the .history/.jsonl/.json writes)
+        //     and spam "workspaces changed" even with the IDE closed.
+        //   - We only notify when the resolved workspace SET actually changes
+        //     (a workspace-hash dir added or removed). resolveIdeV1WorkspaceDirs
+        //     already excludes `cli`, so CLI activity can never change the set.
         if (existsSync(ideV1BasePath)) {
+          let knownWorkspaces = new Set(ideV1WorkspaceDirs);
           watchers.push(watchDirectory(ideV1BasePath, () => {
+            const current = new Set(resolveIdeV1WorkspaceDirs(ideV1BasePath));
+            // Symmetric-difference check: same size AND every current dir known.
+            const unchanged =
+              current.size === knownWorkspaces.size &&
+              [...current].every(d => knownWorkspaces.has(d));
+            if (unchanged) return; // ignore noise (e.g. writes under cli/)
+            knownWorkspaces = current;
             console.log('IDE v1.0 workspaces changed, notifying clients...');
             notifyClients();
-          }));
+          }, { recursive: false }));
         }
         ideV1Watcher = { close: () => watchers.forEach(w => w.close()) };
       }
