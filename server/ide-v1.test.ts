@@ -679,3 +679,66 @@ describe('createIdeV1Reader refresh (live workspace detection)', () => {
     expect(reader.getConversations()).toEqual([]);
   });
 });
+
+// Guards the base-path watcher's change-gating invariant (server/cli.ts):
+// the watcher only notifies clients when the RESOLVED WORKSPACE SET changes.
+// This models that exact set-comparison so a CLI write (under cli/) provably
+// leaves the set unchanged — the regression that spammed "IDE v1.0 workspaces
+// changed, notifying clients..." on every CLI turn, even with the IDE closed.
+describe('base-path watcher: workspace-set change detection', () => {
+  // Mirror of the comparison the watcher uses to decide whether to notify.
+  function setChanged(prev: string[], next: string[]): boolean {
+    const a = new Set(prev);
+    const b = new Set(next);
+    if (a.size !== b.size) return true;
+    return ![...b].every(d => a.has(d));
+  }
+
+  it('a write under cli/ does NOT change the workspace set (no notify)', () => {
+    mkdirSync(join(tempDir, 'cli'), { recursive: true });
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    // Simulate a CLI turn: files churn inside cli/ (.history/.jsonl/.json).
+    writeFileSync(join(tempDir, 'cli', 'sess.history'), 'x');
+    writeFileSync(join(tempDir, 'cli', 'sess.jsonl'), '{}');
+    writeFileSync(join(tempDir, 'cli', 'sess.json'), '{}');
+
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(after).toEqual(before);
+    expect(setChanged(before, after)).toBe(false);
+  });
+
+  it('adding a workspace-hash dir DOES change the set (notify)', () => {
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    mkdirSync(join(tempDir, 'ws-hash-B'));
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(setChanged(before, after)).toBe(true);
+  });
+
+  it('removing a workspace-hash dir DOES change the set (notify)', () => {
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+    mkdirSync(join(tempDir, 'ws-hash-B'));
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    rmSync(join(tempDir, 'ws-hash-B'), { recursive: true, force: true });
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(setChanged(before, after)).toBe(true);
+  });
+
+  it('creating the cli/ dir itself does NOT change the set (excluded)', () => {
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    mkdirSync(join(tempDir, 'cli'));
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(setChanged(before, after)).toBe(false);
+  });
+});
