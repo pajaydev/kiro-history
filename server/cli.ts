@@ -174,13 +174,26 @@ export async function main(): Promise<void> {
       let ideV1Watcher: { close(): void } | undefined;
       if (ideV1Reader) {
         console.log(`Also found v1.0 IDE sessions in ${ideV1WorkspaceDirs.length} workspace(s)`);
-        // Watch each existing workspace directory for new sessions.
         const watchers: { close(): void }[] = [];
-        for (const dir of ideV1WorkspaceDirs) {
+        // Track which workspace dirs already have a per-workspace watcher so we
+        // never double-watch and can attach watchers to workspaces discovered
+        // after startup.
+        const watchedWorkspaces = new Set<string>();
+
+        // Attach a recursive watcher to a single workspace dir (fires on new
+        // sessions and on new turns written inside existing sessions).
+        const watchWorkspace = (dir: string) => {
+          if (watchedWorkspaces.has(dir)) return;
+          watchedWorkspaces.add(dir);
           watchers.push(watchDirectory(dir, () => {
             console.log('IDE v1.0 sessions changed, notifying clients...');
             notifyClients();
           }));
+        };
+
+        // Watch each existing workspace directory for new sessions.
+        for (const dir of ideV1WorkspaceDirs) {
+          watchWorkspace(dir);
         }
         // Also watch the base ~/.kiro/sessions/ directory so a brand-new
         // workspace-hash directory (an IDE project opened for the first time
@@ -205,6 +218,13 @@ export async function main(): Promise<void> {
               current.size === knownWorkspaces.size &&
               [...current].every(d => knownWorkspaces.has(d));
             if (unchanged) return; // ignore noise (e.g. writes under cli/)
+            // Attach a per-workspace watcher to any newly-added workspace dir so
+            // subsequent turns inside it are also seen live (not just the first
+            // one caught by this base-path notify). Without this, a workspace
+            // opened after startup would appear once then go stale.
+            for (const dir of current) {
+              if (!knownWorkspaces.has(dir)) watchWorkspace(dir);
+            }
             knownWorkspaces = current;
             console.log('IDE v1.0 workspaces changed, notifying clients...');
             notifyClients();
