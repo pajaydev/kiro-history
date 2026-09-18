@@ -7,6 +7,7 @@ import { createDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
 import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
 import { createIdeV1Reader, resolveIdeV1WorkspaceDirs, resolveIdeV1BasePath } from './ide-v1.js';
+import { watchIdeV1Workspaces } from './ide-v1-watch.js';
 import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
@@ -174,63 +175,21 @@ export async function main(): Promise<void> {
       let ideV1Watcher: { close(): void } | undefined;
       if (ideV1Reader) {
         console.log(`Also found v1.0 IDE sessions in ${ideV1WorkspaceDirs.length} workspace(s)`);
-        const watchers: { close(): void }[] = [];
-        // Track which workspace dirs already have a per-workspace watcher so we
-        // never double-watch and can attach watchers to workspaces discovered
-        // after startup.
-        const watchedWorkspaces = new Set<string>();
-
-        // Attach a recursive watcher to a single workspace dir (fires on new
-        // sessions and on new turns written inside existing sessions).
-        const watchWorkspace = (dir: string) => {
-          if (watchedWorkspaces.has(dir)) return;
-          watchedWorkspaces.add(dir);
-          watchers.push(watchDirectory(dir, () => {
+        ideV1Watcher = watchIdeV1Workspaces({
+          basePath: ideV1BasePath,
+          basePathExists: existsSync(ideV1BasePath),
+          initialWorkspaceDirs: ideV1WorkspaceDirs,
+          resolveWorkspaceDirs: resolveIdeV1WorkspaceDirs,
+          watchDirectory,
+          onSessionsChanged: () => {
             console.log('IDE v1.0 sessions changed, notifying clients...');
             notifyClients();
-          }));
-        };
-
-        // Watch each existing workspace directory for new sessions.
-        for (const dir of ideV1WorkspaceDirs) {
-          watchWorkspace(dir);
-        }
-        // Also watch the base ~/.kiro/sessions/ directory so a brand-new
-        // workspace-hash directory (an IDE project opened for the first time
-        // after startup) is detected live. The reader's getConversations()
-        // calls refresh() to re-resolve the workspace list on the next read.
-        //
-        // This watch is NON-RECURSIVE and change-gated on purpose:
-        //   - Non-recursive so writes *inside* subdirectories don't fire it.
-        //     In particular the CLI V2 store lives at ~/.kiro/sessions/cli/,
-        //     which is a child of this base dir; a recursive watch here would
-        //     misfire on every CLI turn (see the .history/.jsonl/.json writes)
-        //     and spam "workspaces changed" even with the IDE closed.
-        //   - We only notify when the resolved workspace SET actually changes
-        //     (a workspace-hash dir added or removed). resolveIdeV1WorkspaceDirs
-        //     already excludes `cli`, so CLI activity can never change the set.
-        if (existsSync(ideV1BasePath)) {
-          let knownWorkspaces = new Set(ideV1WorkspaceDirs);
-          watchers.push(watchDirectory(ideV1BasePath, () => {
-            const current = new Set(resolveIdeV1WorkspaceDirs(ideV1BasePath));
-            // Symmetric-difference check: same size AND every current dir known.
-            const unchanged =
-              current.size === knownWorkspaces.size &&
-              [...current].every(d => knownWorkspaces.has(d));
-            if (unchanged) return; // ignore noise (e.g. writes under cli/)
-            // Attach a per-workspace watcher to any newly-added workspace dir so
-            // subsequent turns inside it are also seen live (not just the first
-            // one caught by this base-path notify). Without this, a workspace
-            // opened after startup would appear once then go stale.
-            for (const dir of current) {
-              if (!knownWorkspaces.has(dir)) watchWorkspace(dir);
-            }
-            knownWorkspaces = current;
+          },
+          onWorkspacesChanged: () => {
             console.log('IDE v1.0 workspaces changed, notifying clients...');
             notifyClients();
-          }, { recursive: false }));
-        }
-        ideV1Watcher = { close: () => watchers.forEach(w => w.close()) };
+          },
+        });
       }
 
       const { port, close: closeServer } = await startServer({ 
