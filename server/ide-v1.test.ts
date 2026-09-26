@@ -578,3 +578,167 @@ describe('resolveIdeV1WorkspaceDirs', () => {
     expect(dirs[0]).toBe(join(tempDir, 'workspace-hash-1'));
   });
 });
+
+describe('createIdeV1Reader refresh (live workspace detection)', () => {
+  it('picks up a workspace-hash dir created after the reader exists (base-path mode)', () => {
+    // Start with one existing workspace and a session in it.
+    const wsA = join(tempDir, 'ws-hash-A');
+    writeIdeSession(wsA, 'session-A', baseMeta({ id: 'session-A' }), [
+      userEntry('First'),
+      turnStartEntry(),
+      assistantEntry('Reply A'),
+      turnEndEntry(),
+    ]);
+
+    // Reader created with base path so refresh() re-scans on each read.
+    const initialDirs = resolveIdeV1WorkspaceDirs(tempDir);
+    const reader = createIdeV1Reader(initialDirs, tempDir);
+
+    expect(reader.getConversations()).toHaveLength(1);
+
+    // Simulate opening a brand-new IDE project AFTER the reader was created:
+    // a new workspace-hash dir with its own session appears.
+    const wsB = join(tempDir, 'ws-hash-B');
+    writeIdeSession(wsB, 'session-B', baseMeta({ id: 'session-B' }), [
+      userEntry('Second'),
+      turnStartEntry(),
+      assistantEntry('Reply B'),
+      turnEndEntry(),
+    ]);
+
+    // Without a restart, the new workspace's session is now visible.
+    const convs = reader.getConversations();
+    expect(convs).toHaveLength(2);
+    expect(convs.map(c => c.conversationId).sort()).toEqual(['session-A', 'session-B']);
+  });
+
+  it('refresh() is a no-op in fixed-list mode (no base path)', () => {
+    const wsA = join(tempDir, 'ws-hash-A');
+    writeIdeSession(wsA, 'session-A', baseMeta({ id: 'session-A' }), [
+      userEntry('First'),
+      turnStartEntry(),
+      assistantEntry('Reply A'),
+      turnEndEntry(),
+    ]);
+
+    // No base path -> fixed list; refresh() must not re-scan.
+    const reader = createIdeV1Reader([wsA]);
+    expect(reader.getConversations()).toHaveLength(1);
+
+    // A new workspace dir appears, but fixed-list readers must ignore it.
+    const wsB = join(tempDir, 'ws-hash-B');
+    writeIdeSession(wsB, 'session-B', baseMeta({ id: 'session-B' }), [
+      userEntry('Second'),
+      turnStartEntry(),
+      assistantEntry('Reply B'),
+      turnEndEntry(),
+    ]);
+
+    expect(reader.getConversations()).toHaveLength(1);
+  });
+
+  it('calling refresh() directly re-resolves the workspace list', () => {
+    const reader = createIdeV1Reader([], tempDir);
+    expect(reader.getConversations()).toEqual([]);
+
+    const wsA = join(tempDir, 'ws-hash-A');
+    writeIdeSession(wsA, 'session-A', baseMeta({ id: 'session-A' }), [
+      userEntry('Hi'),
+      turnStartEntry(),
+      assistantEntry('Hello'),
+      turnEndEntry(),
+    ]);
+
+    reader.refresh();
+    expect(reader.getConversations()).toHaveLength(1);
+  });
+
+  it('gracefully handles a base path that is removed after creation', () => {
+    const wsA = join(tempDir, 'ws-hash-A');
+    writeIdeSession(wsA, 'session-A', baseMeta({ id: 'session-A' }), [
+      userEntry('Hi'),
+      turnStartEntry(),
+      assistantEntry('Hello'),
+      turnEndEntry(),
+    ]);
+
+    const reader = createIdeV1Reader(resolveIdeV1WorkspaceDirs(tempDir), tempDir);
+    expect(reader.getConversations()).toHaveLength(1);
+
+    // Base path disappears -> refresh() resolves to empty, no throw.
+    rmSync(tempDir, { recursive: true, force: true });
+    expect(reader.getConversations()).toEqual([]);
+  });
+
+  it('does not treat the cli dir as an IDE workspace on refresh', () => {
+    // A cli/ dir appearing under the base must never become an IDE workspace.
+    mkdirSync(join(tempDir, 'cli'), { recursive: true });
+    const reader = createIdeV1Reader([], tempDir);
+
+    reader.refresh();
+    expect(reader.getConversations()).toEqual([]);
+  });
+});
+
+// Guards the base-path watcher's change-gating invariant (server/cli.ts):
+// the watcher only notifies clients when the RESOLVED WORKSPACE SET changes.
+// This models that exact set-comparison so a CLI write (under cli/) provably
+// leaves the set unchanged — the regression that spammed "IDE v1.0 workspaces
+// changed, notifying clients..." on every CLI turn, even with the IDE closed.
+describe('base-path watcher: workspace-set change detection', () => {
+  // Mirror of the comparison the watcher uses to decide whether to notify.
+  function setChanged(prev: string[], next: string[]): boolean {
+    const a = new Set(prev);
+    const b = new Set(next);
+    if (a.size !== b.size) return true;
+    return ![...b].every(d => a.has(d));
+  }
+
+  it('a write under cli/ does NOT change the workspace set (no notify)', () => {
+    mkdirSync(join(tempDir, 'cli'), { recursive: true });
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    // Simulate a CLI turn: files churn inside cli/ (.history/.jsonl/.json).
+    writeFileSync(join(tempDir, 'cli', 'sess.history'), 'x');
+    writeFileSync(join(tempDir, 'cli', 'sess.jsonl'), '{}');
+    writeFileSync(join(tempDir, 'cli', 'sess.json'), '{}');
+
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(after).toEqual(before);
+    expect(setChanged(before, after)).toBe(false);
+  });
+
+  it('adding a workspace-hash dir DOES change the set (notify)', () => {
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    mkdirSync(join(tempDir, 'ws-hash-B'));
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(setChanged(before, after)).toBe(true);
+  });
+
+  it('removing a workspace-hash dir DOES change the set (notify)', () => {
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+    mkdirSync(join(tempDir, 'ws-hash-B'));
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    rmSync(join(tempDir, 'ws-hash-B'), { recursive: true, force: true });
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(setChanged(before, after)).toBe(true);
+  });
+
+  it('creating the cli/ dir itself does NOT change the set (excluded)', () => {
+    mkdirSync(join(tempDir, 'ws-hash-A'));
+    const before = resolveIdeV1WorkspaceDirs(tempDir);
+
+    mkdirSync(join(tempDir, 'cli'));
+    const after = resolveIdeV1WorkspaceDirs(tempDir);
+
+    expect(setChanged(before, after)).toBe(false);
+  });
+});
