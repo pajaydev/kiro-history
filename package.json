@@ -1,6 +1,6 @@
 {
   "name": "kiro-history",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "View Kiro CLI conversation history in your browser",
   "type": "module",
   "bin": {
