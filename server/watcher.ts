@@ -48,24 +48,39 @@ export function watchFile(
   };
 }
 
+export interface WatchDirectoryOptions {
+  /**
+   * Watch subdirectories recursively. Defaults to true.
+   * Set to false to watch only direct children of dirPath (e.g. to detect
+   * top-level directory add/remove without reacting to writes deep inside).
+   */
+  recursive?: boolean;
+}
+
 export function watchDirectory(
   dirPath: string,
-  onChange: () => void
+  onChange: (filename: string | null) => void,
+  options: WatchDirectoryOptions = {}
 ): FileWatcher {
+  const { recursive = true } = options;
   let debounceTimer: NodeJS.Timeout | null = null;
   let watcher: FSWatcher | null = null;
+  // Remember the filename from the most recent event so the debounced
+  // callback can pass it through (callers may filter on it).
+  let lastFilename: string | null = null;
 
   const debouncedOnChange = () => {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
     debounceTimer = setTimeout(() => {
-      onChange();
+      onChange(lastFilename);
     }, 300); // 300ms debounce for directory watching (reduced from 1s for faster updates)
   };
 
   try {
-    watcher = watch(dirPath, { recursive: true }, (_eventType, _filename) => {
+    watcher = watch(dirPath, { recursive }, (_eventType, filename) => {
+      lastFilename = filename;
       debouncedOnChange();
     });
 
