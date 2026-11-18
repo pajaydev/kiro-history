@@ -12,6 +12,7 @@ import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
 import { openBrowser } from './browser.js';
+import { readPackageVersion } from './version.js';
 
 export type SourceType = 'cli' | 'ide' | 'auto';
 
@@ -77,7 +78,7 @@ export async function main(): Promise<void> {
   program
     .name('kiro-history')
     .description('View Kiro conversation history in your browser (supports both CLI and IDE)')
-    .version('0.3.1')
+    .version(readPackageVersion())
     .argument('[path]', 'Custom path to the database file (CLI) or sessions directory (IDE)')
     .option('-p, --port <number>', 'Port to run the server on (default: auto)')
     .option('-s, --source <type>', 'Source type: cli, ide, or auto (default: auto)', 'auto')
