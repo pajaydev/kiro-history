@@ -9,6 +9,7 @@ import type { IdeReader } from './ide.js';
 import type { CliV2Reader } from './cli-v2.js';
 import type { IdeV1Reader } from './ide-v1.js';
 import { parseConversationValue, parseConversationValueSimple } from './parser.js';
+import { DEFAULT_HOST } from './constants.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -197,7 +198,7 @@ export async function startServer(
   options: ServerOptions & { port?: number; hostname?: string }
 ): Promise<{ port: number; close: () => void }> {
   const app = createApp(options);
-  const hostname = options.hostname || '127.0.0.1';
+  const hostname = options.hostname || DEFAULT_HOST;
 
   return new Promise((resolve) => {
     const server = serve({
