@@ -13,6 +13,7 @@ import type { ServerOptions } from './index.js';
 import { watchFile, watchDirectory } from './watcher.js';
 import { openBrowser } from './browser.js';
 import { readPackageVersion } from './version.js';
+import { DEFAULT_SOURCE } from './constants.js';
 
 export type SourceType = 'cli' | 'ide' | 'auto';
 
@@ -81,12 +82,12 @@ export async function main(): Promise<void> {
     .version(readPackageVersion())
     .argument('[path]', 'Custom path to the database file (CLI) or sessions directory (IDE)')
     .option('-p, --port <number>', 'Port to run the server on (default: auto)')
-    .option('-s, --source <type>', 'Source type: cli, ide, or auto (default: auto)', 'auto')
+    .option('-s, --source <type>', 'Source type: cli, ide, or auto', DEFAULT_SOURCE)
     .option('--host <address>', 'Host address to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--no-open', 'Do not open browser automatically')
     .action(async (userPath?: string, options?: { port?: string; open?: boolean; source?: string; host?: string }) => {
-      const sourceOption = (options?.source || 'auto') as SourceType;
-      const source = sourceOption === 'auto' ? detectSource() : sourceOption as 'cli' | 'ide';
+      const sourceOption = (options?.source || DEFAULT_SOURCE) as SourceType;
+      const source = sourceOption === DEFAULT_SOURCE ? detectSource() : sourceOption as 'cli' | 'ide';
 
       let reader: ServerOptions['reader'];
       let alternateReader: ServerOptions['alternateReader'];
