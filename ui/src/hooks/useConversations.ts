@@ -16,7 +16,13 @@ export function useConversations(source?: 'cli' | 'ide') {
         ? `/api/conversations?source=${sourceParam}` 
         : '/api/conversations';
       const res = await fetch(url);
-      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+      const data: unknown = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error('Unexpected response: expected a list of conversations');
+      }
       if (id === fetchIdRef.current) {
         setConversations(data);
         setLastUpdated(new Date());

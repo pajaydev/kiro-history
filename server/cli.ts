@@ -2,8 +2,8 @@
 import { existsSync } from 'fs';
 import { homedir, platform } from 'os';
 import { join } from 'path';
-import { Command } from 'commander';
-import { createDatabaseReader } from './db.js';
+import { Command, Option, InvalidArgumentError } from 'commander';
+import { createDatabaseReader, createEmptyDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
 import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
 import { createIdeV1Reader, resolveIdeV1WorkspaceDirs, resolveIdeV1BasePath } from './ide-v1.js';
@@ -57,20 +57,43 @@ export function resolveIdePath(userPath?: string): string {
   }
 }
 
-export function detectSource(): 'cli' | 'ide' {
-  const idePath = resolveIdePath();
-  const dbPath = resolveDbPath();
-
+/** Which conversation stores exist on disk. */
+export function findSources(userPath?: string) {
+  const idePath = resolveIdePath(userPath);
+  const dbPath = resolveDbPath(userPath);
   const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
   const hasNewIde = resolveIdeV1WorkspaceDirs().length > 0;
-  const hasIde = hasOldIde || hasNewIde;
-  const hasCli = existsSync(dbPath);
+  const hasDb = existsSync(dbPath);
+  // Newer kiro-cli versions write flat session files instead of (or as well as) the DB.
+  const hasCliV2 = existsSync(resolveCliV2Path());
+  return {
+    idePath, dbPath, hasOldIde, hasNewIde, hasDb, hasCliV2,
+    hasIde: hasOldIde || hasNewIde,
+    hasCli: hasDb || hasCliV2,
+  };
+}
+
+export function detectSource(): 'cli' | 'ide' {
+  const { hasIde, hasCli } = findSources();
 
   if (hasIde && !hasCli) return 'ide';
   if (hasCli && !hasIde) return 'cli';
   // Both exist — prefer CLI as default
   if (hasCli) return 'cli';
   return 'ide';
+}
+
+const SOURCE_CHOICES = ['cli', 'ide', 'auto'];
+
+export function parsePort(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new InvalidArgumentError('Port must be a whole number between 0 and 65535.');
+  }
+  const port = Number(value);
+  if (port > 65535) {
+    throw new InvalidArgumentError('Port must be a whole number between 0 and 65535.');
+  }
+  return port;
 }
 
 export async function main(): Promise<void> {
@@ -81,44 +104,45 @@ export async function main(): Promise<void> {
     .description('View Kiro conversation history in your browser (supports both CLI and IDE)')
     .version(readPackageVersion())
     .argument('[path]', 'Custom path to the database file (CLI) or sessions directory (IDE)')
-    .option('-p, --port <number>', 'Port to run the server on (default: auto)')
-    .option('-s, --source <type>', 'Source type: cli, ide, or auto', DEFAULT_SOURCE)
+    .option('-p, --port <number>', 'Port to run the server on (default: auto)', parsePort)
+    .addOption(
+      new Option('-s, --source <type>', 'Source type')
+        .choices(SOURCE_CHOICES)
+        .default(DEFAULT_SOURCE)
+    )
     .option('--host <address>', 'Host address to bind to', DEFAULT_HOST)
     .option('--no-open', 'Do not open browser automatically')
-    .action(async (userPath?: string, options?: { port?: string; open?: boolean; source?: string; host?: string }) => {
+    .action(async (userPath?: string, options?: { port?: number; open?: boolean; source?: string; host?: string }) => {
       const sourceOption = (options?.source || DEFAULT_SOURCE) as SourceType;
-      const source = sourceOption === DEFAULT_SOURCE ? detectSource() : sourceOption as 'cli' | 'ide';
+      const source = sourceOption === 'auto' ? detectSource() : sourceOption;
 
       let reader: ServerOptions['reader'];
       let alternateReader: ServerOptions['alternateReader'];
       let alternateSourceType: ServerOptions['alternateSourceType'];
-      let watchTarget: string;
       let watcherInstance: { close(): void } | undefined;
 
       // Try to load both sources if available
-      const idePath = resolveIdePath(userPath);
-      const dbPath = resolveDbPath(userPath);
-      const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
-      const hasNewIde = resolveIdeV1WorkspaceDirs().length > 0;
-      const hasIde = hasOldIde || hasNewIde;
-      const hasCli = existsSync(dbPath);
+      const { idePath, dbPath, hasOldIde, hasNewIde, hasIde, hasDb, hasCli } = findSources(userPath);
+      // The CLI view merges V2 flat files into whatever the DB holds, so with
+      // no DB an empty DB reader still lets the flat-file sessions show.
+      const openCliReader = () => (hasDb ? createDatabaseReader(dbPath) : createEmptyDatabaseReader());
 
       if (source === 'ide') {
         const wsSessionsDir = join(idePath, 'workspace-sessions');
 
-        if (!existsSync(idePath)) {
-          console.error(`Error: Kiro IDE data not found at: ${idePath}`);
+        if (!existsSync(idePath) && !hasNewIde) {
+          console.error(`Error: Kiro IDE data not found at: ${idePath} or ${resolveIdeV1BasePath()}`);
           console.error('Make sure Kiro IDE is installed, or specify the path as an argument.');
           process.exit(1);
         }
 
-        console.log(`Using pre v1.0 IDE sessions: ${idePath}`);
+        if (hasOldIde) console.log(`Using pre v1.0 IDE sessions: ${idePath}`);
         reader = createIdeReader(idePath);
 
         // Load CLI as alternate if available
         if (hasCli) {
-          console.log(`Also found CLI database: ${dbPath}`);
-          alternateReader = createDatabaseReader(dbPath);
+          if (hasDb) console.log(`Also found CLI database: ${dbPath}`);
+          alternateReader = openCliReader();
           alternateSourceType = 'cli';
         }
 
@@ -131,31 +155,32 @@ export async function main(): Promise<void> {
         }
       } else {
 
-        if (!existsSync(dbPath)) {
-          console.error(`Error: Database file not found at: ${dbPath}`);
+        if (!hasCli) {
+          console.error(`Error: No Kiro CLI data found at: ${dbPath} or ${resolveCliV2Path()}`);
           console.error('Please specify a valid database path as an argument.');
           process.exit(1);
         }
 
-        console.log(`Using database: ${dbPath}`);
-        reader = createDatabaseReader(dbPath);
-        watchTarget = dbPath;
+        if (hasDb) console.log(`Using database: ${dbPath}`);
+        reader = openCliReader();
 
         // Load IDE as alternate if available
         if (hasIde) {
-          console.log(`Also found pre v1.0 IDE sessions: ${idePath}`);
+          if (hasOldIde) console.log(`Also found pre v1.0 IDE sessions: ${idePath}`);
           alternateReader = createIdeReader(idePath);
           alternateSourceType = 'ide';
         }
 
-        watcherInstance = watchFile(watchTarget, () => {
-          console.log('Database changed, notifying clients...');
-          notifyClients();
-        });
+        if (hasDb) {
+          watcherInstance = watchFile(dbPath, () => {
+            console.log('Database changed, notifying clients...');
+            notifyClients();
+          });
+        }
       }
 
       // Start server
-      const requestedPort = options?.port ? parseInt(options.port, 10) : 0;
+      const requestedPort = options?.port ?? 0;
 
       // Create V2 flat file reader for CLI sessions
       const cliV2Path = resolveCliV2Path();
@@ -195,16 +220,30 @@ export async function main(): Promise<void> {
         });
       }
 
-      const { port, close: closeServer } = await startServer({ 
-        reader, 
-        port: requestedPort,
-        hostname: options?.host,
-        sourceType: source,
-        alternateReader,
-        alternateSourceType,
-        cliV2Reader,
-        ideV1Reader,
-      });
+      let started: Awaited<ReturnType<typeof startServer>>;
+      try {
+        started = await startServer({
+          reader,
+          port: requestedPort,
+          hostname: options?.host,
+          sourceType: source,
+          alternateReader,
+          alternateSourceType,
+          cliV2Reader,
+          ideV1Reader,
+        });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'EADDRINUSE') {
+          console.error(`Error: Port ${requestedPort} is already in use. Pick another with --port, or omit it to use a free port.`);
+        } else if (code === 'EADDRNOTAVAIL' || code === 'ENOTFOUND') {
+          console.error(`Error: Cannot bind to host ${options?.host}: address not available on this machine.`);
+        } else {
+          console.error('Error: Failed to start server:', (error as Error).message);
+        }
+        process.exit(1);
+      }
+      const { port, close: closeServer } = started;
       const url = `http://localhost:${port}`;
       console.log(`Server running at: ${url}`);
 

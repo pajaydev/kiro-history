@@ -33,9 +33,10 @@ export function App() {
 
   // The CLI can resume a session by id (`kiro-cli chat --resume-id <id>`).
   // IDE sessions have no CLI resume path, so we fall back to copying the directory.
-  const canResume = currentSource === 'cli' && !!selectedConversation?.conversationId;
-  const resumeCommand = selectedConversation
-    ? `kiro-cli chat --resume-id ${selectedConversation.conversationId}`
+  // Legacy DB conversations have synthesized ids, so only trust resumeId.
+  const canResume = currentSource === 'cli' && !!selectedConversation?.resumeId;
+  const resumeCommand = selectedConversation?.resumeId
+    ? `kiro-cli chat --resume-id ${selectedConversation.resumeId}`
     : '';
 
   const handleCopy = async () => {
