@@ -82,3 +82,13 @@ export function createDatabaseReader(dbPath: string): DatabaseReader {
     },
   };
 }
+
+/** A reader with no conversations, for when only CLI V2 flat files exist. */
+export function createEmptyDatabaseReader(): DatabaseReader {
+  return {
+    getConversations: () => [],
+    getConversationsV2: () => [],
+    hasV2Table: () => false,
+    close: () => {},
+  };
+}

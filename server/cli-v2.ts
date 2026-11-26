@@ -182,11 +182,13 @@ export function createCliV2Reader(sessionsDir: string): CliV2Reader {
 
         const updatedAt = meta.updated_at ? new Date(meta.updated_at).getTime() : undefined;
 
+        const conversationId = meta.session_id || file.replace('.json', '');
         conversations.push({
           directoryPath: meta.cwd || '',
-          conversationId: meta.session_id || file.replace('.json', ''),
+          conversationId,
           messages,
           updatedAt,
+          resumeId: conversationId,
         });
       }
 
