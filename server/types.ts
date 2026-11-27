@@ -8,6 +8,12 @@ export interface ParsedConversation {
   conversationId: string;
   messages: ConversationMessage[];
   updatedAt?: number; // Unix timestamp in milliseconds
+  /**
+   * Id to pass to `kiro-cli chat --resume-id`. Absent when the conversation
+   * cannot be resumed (IDE sessions, and legacy DB rows whose ids are
+   * synthesized by splitting history on time gaps).
+   */
+  resumeId?: string;
 }
 
 export interface ToolUse {

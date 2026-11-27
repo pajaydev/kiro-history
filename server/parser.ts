@@ -38,6 +38,18 @@ function extractToolUses(rawToolUses?: RawToolUse[]): ToolUse[] | undefined {
   }));
 }
 
+// Rows already reported as unparseable. The list is re-read on every request
+// and live refresh, so warn once per row instead of on every read.
+const warnedKeys = new Set<string>();
+
+function warnParseFailure(key: string, error: unknown): void {
+  const id = `${key}\0${error instanceof Error ? error.message : String(error)}`;
+  if (warnedKeys.has(id)) return;
+  warnedKeys.add(id);
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`Skipping unreadable conversation for ${key}: ${reason}`);
+}
+
 // Gap threshold for splitting sessions (30 minutes)
 const SESSION_GAP_MS = 30 * 60 * 1000;
 
@@ -141,7 +153,7 @@ export function parseConversationValue(
       messages: [],
     }];
   } catch (error) {
-    console.warn(`Failed to parse conversation for ${key}:`, error);
+    warnParseFailure(key, error);
     return [];
   }
 }
@@ -206,7 +218,7 @@ export function parseConversationValueSimple(
 
     return messages;
   } catch (error) {
-    console.warn(`Failed to parse conversation for ${key}:`, error);
+    warnParseFailure(key, error);
     return [];
   }
 }

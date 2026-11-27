@@ -25,6 +25,7 @@ export interface ParsedConversation {
   conversationId: string;
   messages: ConversationMessage[];
   updatedAt?: number; // Unix timestamp in milliseconds (from V2 table)
+  resumeId?: string; // set only when `kiro-cli chat --resume-id` can resume it
 }
 
 // Tool use entry
