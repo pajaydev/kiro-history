@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createIdeV1Reader, resolveIdeV1WorkspaceDirs } from './ide-v1.js';
+import { createIdeV1Reader, resolveIdeV1WorkspaceDirs, readCliV3SessionPaths, countIdeV1Sessions } from './ide-v1.js';
 
 let tempDir: string;
 
@@ -740,5 +740,88 @@ describe('base-path watcher: workspace-set change detection', () => {
     const after = resolveIdeV1WorkspaceDirs(tempDir);
 
     expect(setChanged(before, after)).toBe(false);
+  });
+});
+
+// ── Kiro CLI 3.x sessions ───────────────────────────────────────────
+// CLI 3.x writes the same format into the same ~/.kiro/sessions/<hash>/
+// directories as the IDE, and lists its own sessions in
+// ~/.kiro/session-index/<hash>.jsonl.
+
+describe('Kiro CLI 3.x sessions', () => {
+  function setup() {
+    const base = join(tempDir, 'sessions');
+    const indexDir = join(tempDir, 'session-index');
+    const ws = join(base, 'abc123');
+    mkdirSync(indexDir, { recursive: true });
+    writeIdeSession(ws, 'sess_cli', { id: 'sess_cli', createdAt: '2026-11-28T00:00:00Z', lastModifiedAt: '2026-11-28T00:00:02Z' },
+      [userEntry('from cli'), assistantEntry('cli reply')]);
+    writeIdeSession(ws, 'sess_ide', { id: 'sess_ide', createdAt: '2026-11-28T00:00:00Z', lastModifiedAt: '2026-11-28T00:00:01Z' },
+      [userEntry('from ide'), assistantEntry('ide reply')]);
+    writeFileSync(join(indexDir, 'abc123.jsonl'),
+      JSON.stringify({ op: 'add', sessionPath: 'abc123/sess_cli', at: 1 }) + '\n');
+    return { base, indexDir, ws };
+  }
+
+  it('readCliV3SessionPaths replays add and remove operations', () => {
+    const indexDir = join(tempDir, 'session-index');
+    mkdirSync(indexDir);
+    writeFileSync(join(indexDir, 'h.jsonl'), [
+      JSON.stringify({ op: 'add', sessionPath: 'h/sess_a' }),
+      JSON.stringify({ op: 'add', sessionPath: 'h/sess_b' }),
+      'not json',
+      JSON.stringify({ op: 'remove', sessionPath: 'h/sess_a' }),
+    ].join('\n'));
+    expect([...readCliV3SessionPaths(indexDir)]).toEqual(['h/sess_b']);
+  });
+
+  it('readCliV3SessionPaths returns empty when the index is missing', () => {
+    expect(readCliV3SessionPaths(join(tempDir, 'missing')).size).toBe(0);
+  });
+
+  it('the IDE reader excludes indexed CLI sessions', () => {
+    const { base, indexDir, ws } = setup();
+    const reader = createIdeV1Reader([ws], base, { kind: 'ide', cliIndexDir: indexDir });
+    const convs = reader.getConversations();
+    expect(convs.map(c => c.conversationId)).toEqual(['sess_ide']);
+    expect(convs[0].resumeId).toBeUndefined();
+  });
+
+  it('the CLI reader returns only indexed sessions, with a resume id', () => {
+    const { base, indexDir, ws } = setup();
+    const reader = createIdeV1Reader([ws], base, { kind: 'cli', cliIndexDir: indexDir });
+    const convs = reader.getConversations();
+    expect(convs.map(c => c.conversationId)).toEqual(['sess_cli']);
+    expect(convs[0].resumeId).toBe('sess_cli');
+  });
+
+  it('picks up sessions added to the index after the reader was created', () => {
+    const { base, indexDir, ws } = setup();
+    const reader = createIdeV1Reader([ws], base, { kind: 'cli', cliIndexDir: indexDir });
+    expect(reader.getConversations()).toHaveLength(1);
+    writeFileSync(join(indexDir, 'abc123.jsonl'), [
+      JSON.stringify({ op: 'add', sessionPath: 'abc123/sess_cli' }),
+      JSON.stringify({ op: 'add', sessionPath: 'abc123/sess_ide' }),
+    ].join('\n'));
+    expect(reader.getConversations()).toHaveLength(2);
+  });
+
+  it('countIdeV1Sessions splits sessions between IDE and CLI', () => {
+    const { base, indexDir } = setup();
+    expect(countIdeV1Sessions(base, indexDir)).toEqual({ ide: 1, cli: 1 });
+  });
+
+  it('ignores Reasoning entries so thinking never replaces the reply', () => {
+    const ws = join(tempDir, 'ws');
+    const entry = (operationType: string, content: string) => JSON.stringify({
+      id: `entry-${++entryCounter}`,
+      timestamp: '2026-11-28T00:00:01Z',
+      payload: { type: 'assistant', content, operationType },
+    });
+    writeIdeSession(ws, 'sess_r', { id: 'sess_r', createdAt: '2026-11-28T00:00:00Z', lastModifiedAt: '2026-11-28T00:00:01Z' },
+      [userEntry('q'), turnStartEntry(), entry('Say', 'the answer'), entry('Reasoning', 'my private thoughts'), turnEndEntry()]);
+    const reader = createIdeV1Reader([ws], undefined, { cliIndexDir: join(tempDir, 'none') });
+    const [conv] = reader.getConversations();
+    expect(conv.messages.map(m => m.content)).toEqual(['q', 'the answer']);
   });
 });

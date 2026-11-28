@@ -6,7 +6,7 @@ import { Command, Option, InvalidArgumentError } from 'commander';
 import { createDatabaseReader, createEmptyDatabaseReader } from './db.js';
 import { createIdeReader } from './ide.js';
 import { createCliV2Reader, resolveCliV2Path } from './cli-v2.js';
-import { createIdeV1Reader, resolveIdeV1WorkspaceDirs, resolveIdeV1BasePath } from './ide-v1.js';
+import { createIdeV1Reader, resolveIdeV1WorkspaceDirs, resolveIdeV1BasePath, countIdeV1Sessions } from './ide-v1.js';
 import { watchIdeV1Workspaces } from './ide-v1-watch.js';
 import { startServer, notifyClients } from './index.js';
 import type { ServerOptions } from './index.js';
@@ -62,14 +62,18 @@ export function findSources(userPath?: string) {
   const idePath = resolveIdePath(userPath);
   const dbPath = resolveDbPath(userPath);
   const hasOldIde = existsSync(join(idePath, 'workspace-sessions')) || existsSync(join(idePath, 'sessions'));
-  const hasNewIde = resolveIdeV1WorkspaceDirs().length > 0;
+  // Kiro CLI 3.x shares ~/.kiro/sessions/<hash>/ with the IDE; the session
+  // index tells which of those sessions are the CLI's.
+  const v1Counts = countIdeV1Sessions();
+  const hasNewIde = v1Counts.ide > 0;
+  const hasCliV3 = v1Counts.cli > 0;
   const hasDb = existsSync(dbPath);
   // Newer kiro-cli versions write flat session files instead of (or as well as) the DB.
   const hasCliV2 = existsSync(resolveCliV2Path());
   return {
-    idePath, dbPath, hasOldIde, hasNewIde, hasDb, hasCliV2,
+    idePath, dbPath, hasOldIde, hasNewIde, hasDb, hasCliV2, hasCliV3,
     hasIde: hasOldIde || hasNewIde,
-    hasCli: hasDb || hasCliV2,
+    hasCli: hasDb || hasCliV2 || hasCliV3,
   };
 }
 
@@ -122,7 +126,7 @@ export async function main(): Promise<void> {
       let watcherInstance: { close(): void } | undefined;
 
       // Try to load both sources if available
-      const { idePath, dbPath, hasOldIde, hasNewIde, hasIde, hasDb, hasCli } = findSources(userPath);
+      const { idePath, dbPath, hasOldIde, hasNewIde, hasCliV3, hasIde, hasDb, hasCli } = findSources(userPath);
       // The CLI view merges V2 flat files into whatever the DB holds, so with
       // no DB an empty DB reader still lets the flat-file sessions show.
       const openCliReader = () => (hasDb ? createDatabaseReader(dbPath) : createEmptyDatabaseReader());
@@ -199,10 +203,16 @@ export async function main(): Promise<void> {
       const ideV1WorkspaceDirs = resolveIdeV1WorkspaceDirs();
       // Pass the base path so the reader can refresh() its workspace list and
       // pick up workspaces created after startup without a restart.
-      const ideV1Reader = ideV1WorkspaceDirs.length > 0 ? createIdeV1Reader(ideV1WorkspaceDirs, ideV1BasePath) : undefined;
+      const ideV1Reader = ideV1WorkspaceDirs.length > 0 ? createIdeV1Reader(ideV1WorkspaceDirs, ideV1BasePath, { kind: 'ide' }) : undefined;
+      // Kiro CLI 3.x sessions live in the same directories, so one watcher
+      // below covers both readers.
+      const cliV3Reader = ideV1WorkspaceDirs.length > 0
+        ? createIdeV1Reader(ideV1WorkspaceDirs, ideV1BasePath, { kind: 'cli' })
+        : undefined;
+      if (hasNewIde) console.log(`Also found v1.0 IDE sessions`);
+      if (hasCliV3) console.log(`Also found CLI 3.x sessions`);
       let ideV1Watcher: { close(): void } | undefined;
-      if (ideV1Reader) {
-        console.log(`Also found v1.0 IDE sessions in ${ideV1WorkspaceDirs.length} workspace(s)`);
+      if (ideV1WorkspaceDirs.length > 0) {
         ideV1Watcher = watchIdeV1Workspaces({
           basePath: ideV1BasePath,
           basePathExists: existsSync(ideV1BasePath),
@@ -231,6 +241,7 @@ export async function main(): Promise<void> {
           alternateSourceType,
           cliV2Reader,
           ideV1Reader,
+          cliV3Reader,
         });
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -266,6 +277,7 @@ export async function main(): Promise<void> {
         reader.close();
         if (cliV2Reader) cliV2Reader.close();
         if (ideV1Reader) ideV1Reader.close();
+        if (cliV3Reader) cliV3Reader.close();
         closeServer();
         process.exit(0);
       };

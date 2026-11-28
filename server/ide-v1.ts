@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { homedir } from 'os';
 import type { ParsedConversation, ConversationMessage, ToolUse, TurnMetadata } from './types.js';
 
@@ -28,7 +28,7 @@ interface JsonlEntry {
 
 type JsonlPayload =
   | { type: 'user'; content: string }
-  | { type: 'assistant'; content: string; executionId?: string }
+  | { type: 'assistant'; content: string; executionId?: string; operationType?: string }
   | { type: 'tool_call'; toolCallId: string; toolName: string; args: Record<string, unknown>; status?: string }
   | { type: 'tool_result'; toolCallId: string; content?: string; success?: boolean }
   | { type: 'turn_start'; executionId?: string }
@@ -81,6 +81,80 @@ export function resolveIdeV1WorkspaceDirs(basePath?: string): string[] {
   return dirs;
 }
 
+/**
+ * Kiro CLI 3.x writes its sessions in the same format and under the same
+ * ~/.kiro/sessions/<workspace-hash>/ directories as Kiro IDE. Only the CLI
+ * records them in ~/.kiro/session-index/<workspace-hash>.jsonl, so that index
+ * is what tells the two apart.
+ */
+export function resolveCliV3IndexPath(): string {
+  return join(homedir(), '.kiro', 'session-index');
+}
+
+/**
+ * Returns the set of `<workspace-hash>/<session-id>` paths that belong to
+ * Kiro CLI 3.x, replaying the index's add/remove operations in order.
+ */
+export function readCliV3SessionPaths(indexDir: string = resolveCliV3IndexPath()): Set<string> {
+  const paths = new Set<string>();
+  let files: string[];
+  try {
+    files = readdirSync(indexDir).filter(f => f.endsWith('.jsonl'));
+  } catch {
+    return paths;
+  }
+  for (const file of files) {
+    let lines: string[];
+    try {
+      lines = readFileSync(join(indexDir, file), 'utf-8').split('\n');
+    } catch {
+      continue;
+    }
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as { op?: string; sessionPath?: string };
+        if (typeof entry.sessionPath !== 'string') continue;
+        if (entry.op === 'add') paths.add(entry.sessionPath);
+        else if (entry.op === 'remove') paths.delete(entry.sessionPath);
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+  return paths;
+}
+
+/**
+ * Counts the session directories under ~/.kiro/sessions/ that belong to Kiro
+ * IDE and to Kiro CLI 3.x, without parsing them. Used at startup to decide
+ * which sources exist.
+ */
+export function countIdeV1Sessions(
+  basePath?: string,
+  indexDir?: string,
+): { ide: number; cli: number } {
+  const cliPaths = readCliV3SessionPaths(indexDir);
+  const counts = { ide: 0, cli: 0 };
+  for (const wsDir of resolveIdeV1WorkspaceDirs(basePath)) {
+    let entries: string[];
+    try {
+      entries = readdirSync(wsDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name);
+    } catch {
+      continue;
+    }
+    for (const sessionId of entries) {
+      if (!existsSync(join(wsDir, sessionId, 'session.json'))) continue;
+      if (cliPaths.has(`${basename(wsDir)}/${sessionId}`)) counts.cli++;
+      else counts.ide++;
+    }
+  }
+  return counts;
+}
+
+/** Which sessions a reader returns: IDE sessions, or Kiro CLI 3.x sessions. */
+export type IdeV1ReaderKind = 'ide' | 'cli';
+
 // ── JSONL parser ────────────────────────────────────────────────────
 
 function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMessage[] {
@@ -129,7 +203,10 @@ function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMe
       }
 
       case 'assistant': {
-        const content = (payload as { type: 'assistant'; content: string }).content;
+        const { content, operationType } = payload as { type: 'assistant'; content: string; operationType?: string };
+        // Skip the model's thinking: it is logged as an assistant entry with
+        // operationType 'Reasoning' and must not replace the actual reply.
+        if (operationType === 'Reasoning') break;
         // Skip streaming placeholders ('...')
         if (content && content !== '...') {
           pendingAssistantContent = content;
@@ -210,7 +287,12 @@ function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMe
  *   picked up without a restart. When omitted, `refresh()` is a no-op and the
  *   reader operates on the fixed `workspaceDirs` list it was given.
  */
-export function createIdeV1Reader(workspaceDirs: string[], basePath?: string): IdeV1Reader {
+export function createIdeV1Reader(
+  workspaceDirs: string[],
+  basePath?: string,
+  options: { kind?: IdeV1ReaderKind; cliIndexDir?: string } = {},
+): IdeV1Reader {
+  const kind = options.kind ?? 'ide';
   // Mutable so refresh() can replace it with a freshly-scanned list.
   let currentWorkspaceDirs = workspaceDirs;
 
@@ -223,6 +305,8 @@ export function createIdeV1Reader(workspaceDirs: string[], basePath?: string): I
     getConversations(): ParsedConversation[] {
       // Re-resolve first so newly-created workspace dirs are included.
       refresh();
+      // Re-read each time so sessions the CLI creates later are classified.
+      const cliPaths = readCliV3SessionPaths(options.cliIndexDir);
 
       const conversations: ParsedConversation[] = [];
 
@@ -239,6 +323,8 @@ export function createIdeV1Reader(workspaceDirs: string[], basePath?: string): I
         }
 
         for (const sessionId of sessionDirs) {
+          const isCli = cliPaths.has(`${basename(wsDir)}/${sessionId}`);
+          if (isCli !== (kind === 'cli')) continue;
           const sessionDir = join(wsDir, sessionId);
           const metaPath = join(sessionDir, 'session.json');
           const jsonlPath = join(sessionDir, 'messages.jsonl');
@@ -271,6 +357,8 @@ export function createIdeV1Reader(workspaceDirs: string[], basePath?: string): I
             conversationId: meta.id || sessionId,
             messages,
             updatedAt,
+            // CLI 3.x resumes by session id: `kiro-cli chat --resume-id <id>`
+            ...(kind === 'cli' ? { resumeId: meta.id || sessionId } : {}),
           });
         }
       }

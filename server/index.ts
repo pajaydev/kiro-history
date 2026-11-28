@@ -21,6 +21,8 @@ export interface ServerOptions {
   alternateSourceType?: 'cli' | 'ide';
   cliV2Reader?: CliV2Reader;
   ideV1Reader?: IdeV1Reader;
+  /** Kiro CLI 3.x sessions (same on-disk format as IDE v1.0), shown under CLI. */
+  cliV3Reader?: IdeV1Reader;
   /**
    * Hostnames accepted in the Host header. Requests with any other Host are
    * rejected, which blocks DNS-rebinding attacks from web pages. Defaults to
@@ -85,7 +87,7 @@ const MIME_TYPES: Record<string, string> = {
 
 export function createApp(options: ServerOptions): Hono {
   const app = new Hono();
-  const { reader, sourceType, alternateReader, alternateSourceType, cliV2Reader, ideV1Reader } = options;
+  const { reader, sourceType, alternateReader, alternateSourceType, cliV2Reader, ideV1Reader, cliV3Reader } = options;
   const allowedHosts = new Set(options.allowedHosts ?? LOOPBACK_HOSTS);
 
   // Error handling middleware
@@ -156,11 +158,15 @@ export function createApp(options: ServerOptions): Hono {
         // Merge V2 flat file sessions if available. The flat files are the
         // newer format, so they win when both hold the same conversation
         // (same rule as the IDE merge below).
-        if (cliV2Reader) {
-          const v2FlatConversations = cliV2Reader.getConversations();
-          const flatIds = new Set(v2FlatConversations.map(c => c.conversationId));
+        // CLI 3.x sessions are newer still and use their own ids.
+        const flatConversations = [
+          ...(cliV2Reader ? cliV2Reader.getConversations() : []),
+          ...(cliV3Reader ? cliV3Reader.getConversations() : []),
+        ];
+        if (flatConversations.length > 0) {
+          const flatIds = new Set(flatConversations.map(c => c.conversationId));
           parsed = parsed.filter(c => !flatIds.has(c.conversationId));
-          parsed.push(...v2FlatConversations);
+          parsed.push(...flatConversations);
           // Re-sort by recency after merge
           parsed.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
         }

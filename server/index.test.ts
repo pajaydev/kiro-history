@@ -85,6 +85,26 @@ describe('API routes', () => {
     expect(body[0].messages[0].content).toBe('flat-file copy');
   });
 
+  it('merges CLI 3.x sessions into the CLI list, newest first', async () => {
+    const app = createApp({
+      ...baseOptions,
+      cliV2Reader: cliV2ReaderWith([{
+        directoryPath: '/old', conversationId: 'v2', updatedAt: 1, resumeId: 'v2',
+        messages: [{ role: 'user', content: 'v2 session' }],
+      }]),
+      cliV3Reader: {
+        getConversations: () => [{
+          directoryPath: '/new', conversationId: 'sess_v3', updatedAt: 2, resumeId: 'sess_v3',
+          messages: [{ role: 'user', content: 'v3 session' }],
+        }],
+        refresh: () => {},
+        close: () => {},
+      },
+    });
+    const body = (await (await app.request('/api/conversations', { headers: { host: 'localhost' } })).json()) as ParsedConversation[];
+    expect(body.map(c => c.conversationId)).toEqual(['sess_v3', 'v2']);
+  });
+
   it('sets resumeId for DB V2 conversations', async () => {
     const app = createApp({
       ...baseOptions,
