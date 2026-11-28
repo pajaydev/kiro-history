@@ -14,12 +14,9 @@ npx kiro-history
 
 </div>
 
-<!--
-📸 Add a screenshot or GIF here to showcase the UI, e.g.:
 <div align="center">
-  <img src="assets/screenshot.png" alt="Kiro History UI" width="900" />
+  <img src="assets/demo.gif" alt="Kiro History demo: run npx kiro-history and browse Kiro CLI conversations in the browser" width="900" />
 </div>
--->
 
 ## ✨ Features
 
@@ -107,7 +104,7 @@ kiro-history --source ide ~/path/to/kiro.kiroagent
 
 ## 🔧 How It Works
 
-**Kiro CLI** saves conversations to a local SQLite database (and newer flat-file sessions). **Kiro IDE** stores them as JSON files — both the original pre-v1.0 format and the current v1.0 JSONL format. This tool reads from all sources and displays your chat history in a clean, browsable format.
+**Kiro CLI** saves conversations to a local SQLite database, flat-file sessions in `~/.kiro/sessions/cli/` (2.x), or per-workspace session folders in `~/.kiro/sessions/` (3.x — the same format as Kiro IDE, told apart using the CLI's `~/.kiro/session-index/`). **Kiro IDE** stores them as JSON files — both the original pre-v1.0 format and the current v1.0 JSONL format. This tool reads from all sources and displays your chat history in a clean, browsable format.
 
 ### Default Paths
 
